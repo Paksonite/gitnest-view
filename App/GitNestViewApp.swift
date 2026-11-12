@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct GitNestViewApp: App {
+    @NSApplicationDelegateAdaptor(AppLifecycle.self) private var lifecycle
     @State private var model: AppModel = {
         #if DEBUG
         if let development = AppModel.development() { return development }
@@ -145,4 +146,22 @@ func showAbout() {
     credits.append(link)
     NSApp.orderFrontStandardAboutPanel(options: [.credits: credits, .applicationName: "GitNest View"])
     NSApp.activate()
+}
+
+/// The app keeps running with no window (the menu bar item and the
+/// notifications need it). Under tests nothing may end the host early:
+/// a refused quit says who asked.
+final class AppLifecycle: NSObject, NSApplicationDelegate {
+    private var underTests: Bool { ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard underTests else { return .terminateNow }
+        FileHandle.standardError.write(Data(("GitNest View: a quit was refused while tests run. Asked by:\n"
+            + Thread.callStackSymbols.prefix(25).joined(separator: "\n") + "\n").utf8))
+        return .terminateCancel
+    }
+
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
 }

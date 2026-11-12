@@ -42,13 +42,13 @@ struct ActionsView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                workflowList
-                HLine()
-                runList
+            ResizableColumn(key: "runList", initial: 380, range: 280...720) {
+                VStack(spacing: 0) {
+                    workflowList
+                    HLine()
+                    runList
+                }
             }
-            .frame(width: 380)
-            VLine()
             VStack(spacing: 0) {
                 if let run = current {
                     runHeader(run)

@@ -154,6 +154,13 @@ struct ForgejoClient: Sendable {
     }
 
     /// Branch protection rules; readable by repository admins only.
+    /// What the server says about one branch: protected, and how many
+    /// approvals a merge into it needs. Readable with read access, unlike
+    /// the protection rules themselves (admins only).
+    func branch(_ repo: RepoSlug, name: String) async throws -> BranchInfo {
+        try await get("repos/\(repo.owner)/\(repo.name)/branches/\(name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name)")
+    }
+
     /// The names of the repository's branches on the server.
     func branches(_ repo: RepoSlug) async throws -> [String] {
         struct Branch: Decodable { var name: String }

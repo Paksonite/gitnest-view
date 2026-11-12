@@ -84,6 +84,8 @@ enum AppSheet: Hashable, Sendable {
     case reword(ForgeRepo, HistoryCommit)
     case newTag(ForgeRepo, rev: String, label: String)
     case pullAll
+    /// Clone every repository of the workspace that is not here yet, then pull the rest.
+    case getAll
     /// One branch in several repositories at once (a ticket that spans them).
     case startWork(preselected: ForgeRepo.ID?)
     /// Pull requests for one branch in every repository that has it.
@@ -154,6 +156,8 @@ final class AppModel {
     var myPulls: [MyPull] = []
     /// Branch protection rules by RepoSlug.key; empty when they cannot be read.
     var protections: [String: [BranchProtection]] = [:]
+    /// What the server said about the base branches of pull requests, by "slug.key@branch".
+    var branches: [String: BranchInfo] = [:]
 
     // Local clones under the working directory
     var local: [String: Repo] = [:] // by RepoSlug.key
@@ -707,8 +711,21 @@ final class AppModel {
 
     /// Clones every repository of the workspace that is not cloned yet.
     func cloneAll() async {
-        for repo in repos where clone(of: repo) == nil && repo.empty != true {
-            await clone(repo)
+        await clone(repos.filter { clone(of: $0) == nil && $0.empty != true })
+    }
+
+    /// Clones several repositories, a few at a time; `progress` hears each one done.
+    func clone(_ targets: [ForgeRepo], progress: (@MainActor (ForgeRepo) -> Void)? = nil) async {
+        await withTaskGroup(of: ForgeRepo.self) { group in
+            var waiting = targets.makeIterator()
+            for _ in 0..<3 {
+                guard let repo = waiting.next() else { break }
+                group.addTask { await self.clone(repo); return repo }
+            }
+            for await done in group {
+                progress?(done)
+                if let repo = waiting.next() { group.addTask { await self.clone(repo); return repo } }
+            }
         }
     }
 
@@ -934,9 +951,23 @@ final class AppModel {
     /// How many approvals the base branch of a pull request requires, when
     /// the account can read the branch protection; nil otherwise.
     func requiredApprovals(_ pull: PullRequest, in repo: ForgeRepo) -> Int? {
-        guard let slug = slug(repo), let rules = protections[slug.key] else { return nil }
+        guard let slug = slug(repo) else { return nil }
+        // The branch's own answer first: any token may read it.
+        if let info = branches[Self.branchKey(slug, pull.base.ref)] {
+            return info.protected == true ? info.requiredApprovals.flatMap { $0 > 0 ? $0 : nil } : nil
+        }
+        guard let rules = protections[slug.key] else { return nil }
         return rules.first { $0.covers(pull.base.ref) }?.requiredApprovals.flatMap { $0 > 0 ? $0 : nil }
     }
+
+    /// Whether the app knows if the base branch needs approvals. Without it,
+    /// "no review required" would be a guess.
+    func knowsRequirement(_ pull: PullRequest, in repo: ForgeRepo) -> Bool {
+        guard let slug = slug(repo) else { return false }
+        return branches[Self.branchKey(slug, pull.base.ref)] != nil || !(protections[slug.key] ?? []).isEmpty
+    }
+
+    static func branchKey(_ slug: RepoSlug, _ branch: String) -> String { "\(slug.key)@\(branch)" }
 
     /// Commits, files, reviews, checks, the pipelines of the pull request
     /// and of its merge, and what Terraform printed in them.
@@ -968,6 +999,7 @@ final class AppModel {
         // Only admins may read them: anyone else gets an empty list.
         async let rules: [BranchProtection]? = needsRules ? ((try? await client.branchProtections(slug)) ?? []) : nil
         async let talk = try? client.comments(slug, number: pull.number)
+        async let base = try? client.branch(slug, name: pull.base.ref)
 
         var extra = extras[key] ?? PullExtras()
         if let runs = await headRuns {
@@ -1005,6 +1037,7 @@ final class AppModel {
         if let checks = await status { state.statuses[pull.head.sha] = checks }
         if forge[slug.key] != state { forge[slug.key] = state }
         if let rules = await rules, protections[slug.key] != rules { protections[slug.key] = rules }
+        if let base = await base, branches[Self.branchKey(slug, pull.base.ref)] != base { branches[Self.branchKey(slug, pull.base.ref)] = base }
         extra.loaded = true
         publish(merge(extra, into: key), as: key)
         extrasRead[key] = .now

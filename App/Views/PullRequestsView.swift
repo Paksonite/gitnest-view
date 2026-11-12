@@ -15,7 +15,8 @@ struct PullBrowser: View {
     @State private var chosenFilter: Filter?
 
     private var filter: Filter {
-        chosenFilter ?? (forge.pulls.contains { $0.state == "open" } || forge.pulls.isEmpty ? .open : .all)
+        // Open, unless the user chose otherwise: an empty Open list says "nothing waits".
+        chosenFilter ?? .open
     }
     @State private var selected: PullRequest.ID?
 
@@ -41,8 +42,7 @@ struct PullBrowser: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            list.frame(width: 380)
-            VLine()
+            ResizableColumn(key: "pullList", initial: 380, range: 280...720) { list }
             Group {
                 if let pull = current {
                     PullDetail(repo: repo, pull: pull, forge: forge, overview: overview).id(pull.id).settleIn()
@@ -242,7 +242,8 @@ struct PullDetail: View {
                     }
                     .frame(maxWidth: .infinity)
                     VStack(spacing: 14) {
-                        ReviewsCard(summary: forge.summary(for: pull), required: model.requiredApprovals(pull, in: repo), open: pull.state == "open")
+                        ReviewsCard(summary: forge.summary(for: pull), required: model.requiredApprovals(pull, in: repo), open: pull.state == "open",
+                                    known: model.knowsRequirement(pull, in: repo))
                         if pull.state == "open" { PeopleCard(repo: repo, pull: pull) }
                         ChecksCard(repo: repo, status: forge.statuses[pull.head.sha], scheduled: AppModel.scheduledRuns(forge.runs),
                                    rerun: pull.state == "open" ? { Task { await model.rerunFailed(of: pull, in: repo) } } : nil)
@@ -281,18 +282,24 @@ struct PullDetail: View {
     private var title: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(pull.title).font(.system(size: 17, weight: .semibold)).textSelection(.enabled)
-                Text("#\(pull.number)").font(.system(size: 17)).foregroundStyle(Theme.tertiary)
-                Spacer()
+                (Text(pull.title).font(.system(size: 17, weight: .semibold))
+                    + Text("  #\(pull.number)").font(.system(size: 17)).foregroundStyle(Theme.tertiary))
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .layoutPriority(-1)
+                Spacer(minLength: 8)
                 if pull.state == "open" {
                     if !model.isMine(pull) {
                         Button("Review…", systemImage: "eye") { model.sheet = .review(repo, pull) }
                             .buttonStyle(ChipButtonStyle(prominent: model.reviewRequested(of: pull, in: repo)))
+                            .fixedSize()
                             .needsWrite()
                     }
                     if pull.mergeable != false {
+                        // The step a pull request is for: coloured, and never cut short.
                         Button("Merge…", systemImage: "arrow.triangle.merge") { model.sheet = .merge(repo, pull) }
-                            .buttonStyle(ChipButtonStyle())
+                            .buttonStyle(ChipButtonStyle(prominent: true, tint: Theme.green))
+                            .fixedSize()
                             .needsWrite()
                     }
                 }
@@ -443,6 +450,16 @@ struct RunCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
             }
+            if !run.state.isFinished, let job = jobs.first(where: { $0.state == .running && $0.hasStarted && model.isKey($0) })
+                ?? jobs.first(where: { $0.state == .running && $0.hasStarted }), let slug = model.slug(repo) {
+                // While it runs, the log is here: no click needed to see it move.
+                LogPane(target: LogTarget(repo: slug, runID: run.id, jobID: job.id, title: job.name, webURL: job.htmlURL))
+                    .id(job.id)
+                    .frame(height: 260)
+                    .background(Theme.inset, in: RoundedRectangle(cornerRadius: 6))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
+            }
             if visible.passed + visible.other > 0 {
                 // The other jobs are worth a line only: they passed, or have not run.
                 Text([visible.passed > 0 ? "\(visible.passed) other \(visible.passed == 1 ? "job" : "jobs") passed" : nil,
@@ -571,6 +588,8 @@ struct ReviewsCard: View {
     var required: Int? = nil
     /// The pull request is still open: a missing review still matters.
     var open = true
+    /// The app knows whether the base branch needs approvals.
+    var known = true
 
     var body: some View {
         Card(required.map { "Reviews  \(summary.approvals)/\($0)" } ?? "Reviews") {
@@ -596,7 +615,9 @@ struct ReviewsCard: View {
                 }
                 .font(.system(size: 12))
             } else if summary.verdicts.isEmpty {
-                Text(open ? "No reviews yet. This branch does not require one." : "No reviews.").foregroundStyle(Theme.secondary)
+                Text(!open ? "No reviews." : known ? "No reviews yet. This branch does not require one."
+                     : "No reviews yet. The server did not say whether this branch requires one.")
+                    .foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
             }
             ForEach(summary.verdicts) { verdict in
                 HStack(spacing: 8) {

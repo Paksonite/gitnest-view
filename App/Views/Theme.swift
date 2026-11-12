@@ -394,6 +394,8 @@ struct EmptyState<Actions: View>: View {
 /// A small bordered button, as in the pane headers.
 struct ChipButtonStyle: ButtonStyle {
     var prominent = false
+    /// The colour of a prominent button; blue unless the action is special (merging is green).
+    var tint: Color = Theme.blue
     @Environment(\.isEnabled) private var enabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -403,7 +405,7 @@ struct ChipButtonStyle: ButtonStyle {
             .padding(.horizontal, 9)
             .frame(height: 26)
             .foregroundStyle(prominent ? Color.white : Theme.text)
-            .background(prominent ? Theme.blue : (configuration.isPressed ? Theme.selected : Theme.card), in: RoundedRectangle(cornerRadius: 6))
+            .background(prominent ? tint : (configuration.isPressed ? Theme.selected : Theme.card), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(prominent ? .clear : Theme.border))
             .opacity(enabled ? 1 : 0.45)
             .contentShape(Rectangle())
@@ -558,5 +560,57 @@ private struct HoverBackground: ViewModifier {
             .background(selected ? Theme.selected : (hovering ? Theme.hover : .clear), in: RoundedRectangle(cornerRadius: radius))
             .animation(Motion.hover, value: selected)
             .onHover { hovering = $0 }
+    }
+}
+
+/// A column whose right edge can be dragged; its width is remembered.
+/// A double click on the edge brings the width back to where it started.
+struct ResizableColumn<Content: View>: View {
+    @Environment(AppModel.self) private var model
+    let key: String
+    let initial: CGFloat
+    let range: ClosedRange<CGFloat>
+    @ViewBuilder var content: Content
+    @State private var width: CGFloat?
+    @State private var start: CGFloat?
+    @State private var hovering = false
+
+    var body: some View {
+        let current = width ?? initial
+        HStack(spacing: 0) {
+            content.frame(width: current)
+            Rectangle()
+                .fill(hovering || start != nil ? Theme.blue.opacity(0.6) : Theme.border)
+                .frame(width: hovering || start != nil ? 2 : 1)
+                .padding(.horizontal, 3)
+                .contentShape(Rectangle())
+                .padding(.horizontal, -3)
+                .onHover { inside in
+                    hovering = inside
+                    if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { drag in
+                            if start == nil { start = current }
+                            width = min(range.upperBound, max(range.lowerBound, (start ?? current) + drag.translation.width))
+                        }
+                        .onEnded { _ in
+                            start = nil
+                            if let width { model.defaults.set(Double(width), forKey: "width." + key) }
+                        }
+                )
+                .onTapGesture(count: 2) {
+                    width = initial
+                    model.defaults.removeObject(forKey: "width." + key)
+                }
+                .help("Drag to resize; double-click for the usual width")
+                .accessibilityLabel("Resize")
+        }
+        .onAppear {
+            if width == nil, let saved = model.defaults.object(forKey: "width." + key) as? Double {
+                width = min(range.upperBound, max(range.lowerBound, CGFloat(saved)))
+            }
+        }
     }
 }

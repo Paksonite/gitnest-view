@@ -23,9 +23,7 @@ struct RootView: View {
     @ViewBuilder private var stage: some View {
         if model.isSetUp, !model.wizardOpen {
             HStack(spacing: 0) {
-                SidebarView()
-                    .frame(width: 264)
-                VLine()
+                ResizableColumn(key: "sidebar", initial: 264, range: 220...460) { SidebarView() }
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -37,6 +35,19 @@ struct RootView: View {
     /// What the environment asks for at launch: measuring, and (in debug
     /// builds) opening a screen to look at it.
     private func launchSwitches() async {
+        #if DEBUG
+        // Development and tests: the window on the main screen, whatever
+        // screen the last session used (a screen that is off cannot be seen).
+        let environment = ProcessInfo.processInfo.environment
+        if environment["GNV_DEV_HOST"] != nil || environment["GNV_DEV_ONBOARDING"] != nil, let screen = NSScreen.main {
+            try? await Task.sleep(for: .milliseconds(200))
+            for window in NSApp.windows where window.canBecomeMain {
+                let size = NSSize(width: min(1440, screen.visibleFrame.width - 40), height: min(880, screen.visibleFrame.height - 40))
+                window.setFrame(NSRect(x: screen.visibleFrame.midX - size.width / 2, y: screen.visibleFrame.midY - size.height / 2,
+                                       width: size.width, height: size.height), display: true)
+            }
+        }
+        #endif
         // Measuring: walks the repositories like a user clicking down the
         // sidebar and prints timings (GNV_TRACE). Reads only.
         let env = ProcessInfo.processInfo.environment
@@ -389,7 +400,7 @@ struct WorkspaceList: View {
             }
         }
         DropdownDivider()
-        DropdownItem(title: "Clone all repositories", symbol: "arrow.down.circle") { Task { await model.cloneAll() } }
+        DropdownItem(title: "Get all repositories…", symbol: "square.and.arrow.down.on.square") { model.sheet = .getAll }
         DropdownItem(title: "Reload", symbol: "arrow.clockwise") { Task { await model.reload() } }
     }
 }
@@ -524,7 +535,7 @@ struct RepoRow: View, Equatable {
                 if !Task.isCancelled { model.prefetch(repo) }
             }
         }
-        .help(reasons.map(\.text).joined(separator: "\n"))
+        .help(reasons.isEmpty ? repo.name : reasons.map { "\(AttentionBadges.look($0)): \(AttentionBadges.meaning($0))" }.joined(separator: "\n"))
         .contextMenu {
             Button(pinned ? "Unpin" : "Pin to the Top") { model.togglePin(repo) }
             Divider()
@@ -551,6 +562,23 @@ struct AttentionBadges: View {
             ForEach(reasons, id: \.self) { reason in
                 badge(reason).help(Self.meaning(reason))
             }
+        }
+    }
+
+    /// What a mark looks like, so a tooltip can say which one it explains.
+    static func look(_ reason: AttentionReason) -> String {
+        switch reason {
+        case .conflict: "Red triangle"
+        case .failedMain: "Red ✕"
+        case .scheduledFailing: "Orange clock"
+        case .myPullFailing: "Red pull request"
+        case .myPullChanges: "Orange speech bubble"
+        case .myPullReady: "Green seal"
+        case .reviewRequested: "Orange eye"
+        case .diverged: "↑↓ in red"
+        case .behind: "↓"
+        case .ahead: "↑"
+        case .changes: "Orange dot"
         }
     }
 

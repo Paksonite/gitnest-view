@@ -178,6 +178,8 @@ private struct NotificationSettings: View {
         SettingsPage {
             Section {
                 Toggle("Someone asks for my review", isOn: Binding(get: { model.notifyReviews }, set: { model.notifyReviews = $0 }))
+                Toggle("My pull request is approved, needs changes, or is merged or closed",
+                       isOn: Binding(get: { model.notifyMyPulls }, set: { model.notifyMyPulls = $0 }))
                 Toggle("A pipeline of my pull request, or a scheduled one, fails", isOn: Binding(get: { model.notifyFailures }, set: { model.notifyFailures = $0 }))
             } header: {
                 Text("Forgejo")

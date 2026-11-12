@@ -281,6 +281,8 @@ struct CommandPalette: View {
         })
         out.append(PaletteItem(id: "cmd:releases", kind: .command, title: "Releases…", detail: "what waits on develop, in every repository", symbol: "paperplane", keywords: "release develop main ship") { model.sheet = .releases })
         out.append(PaletteItem(id: "cmd:pullall", kind: .command, title: "Pull All…", detail: "fast-forward what is behind", symbol: "arrow.down.circle") { model.sheet = .pullAll })
+        out.append(PaletteItem(id: "cmd:getall", kind: .command, title: "Get All Repositories…", detail: "clone what is missing, then pull",
+                               symbol: "square.and.arrow.down.on.square") { model.sheet = .getAll })
         out.append(PaletteItem(id: "cmd:home", kind: .command, title: "Go to Home", detail: "activity and what needs you", symbol: "house") { model.section = .home })
         out.append(PaletteItem(id: "cmd:inbox", kind: .command, title: "Go to Inbox", detail: "reviews waiting for you", symbol: "tray") { model.section = .inbox })
         let settings = openSettings

@@ -91,6 +91,11 @@ final class ClickThroughTests: XCTestCase {
             shot("02-tab-\(tab.lowercased().replacingOccurrences(of: " ", with: "-"))")
         }
 
+        // Overview says what runs and what waits; the pull request itself is in Pull requests.
+        button("Overview").click()
+        _ = element("Open pull requests")
+        shot("01a-overview")
+        button("Pull requests").click()
         // The conversation and the people are on the pull request; the menu
         // offers the rest (nothing is chosen here).
         _ = element("Conversation")
@@ -158,6 +163,7 @@ final class ClickThroughTests: XCTestCase {
     func testNewPullRequestForm() throws {
         let repo = try XCTUnwrap(env["GNV_UI_PULL_REPO"], "GNV_UI_PULL_REPO")
         openRepository(repo)
+        button("Pull requests").click()
         _ = element("Review required")
         shot("20-review-required")
         button("Changes").click()
@@ -303,23 +309,25 @@ final class ClickThroughTests: XCTestCase {
     /// Approve, and one click only arms it.
     func testMenuBarQuickAction() throws {
         _ = button("Home", timeout: 25)
-        let heading = element("Waiting for your review", timeout: 20)
+        _ = element("Waiting for your review", timeout: 20)
         sleep(2) // the list settles once the inbox is read
         let window = app.windows.firstMatch.frame
-        // The review rows are the ones under that heading, in the panel (right half).
+        // The panel's rows (right half of the window); a review row offers Approve under the pointer.
         let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS ' #'")).allElementsBoundByIndex
-            .filter { $0.frame.minX > window.midX && $0.frame.minY > heading.frame.minY && $0.frame.minY < heading.frame.minY + 120 }
-        let row = try XCTUnwrap(rows.first, "no review row in the menu bar panel")
+            .filter { $0.frame.minX > window.midX && !$0.label.contains("your pull request") }
+        XCTAssertFalse(rows.isEmpty, "no review row in the menu bar panel")
         shot("15-menubar")
         var approve = app.buttons["Approve"].firstMatch
-        // The pointer has to arrive on the row: come from elsewhere, and try again if the list was still settling.
-        for _ in 0..<4 where !approve.exists {
-            button("Home").hover()
-            usleep(300_000)
-            row.hover()
-            approve = app.buttons["Approve"].firstMatch
-            _ = approve.waitForExistence(timeout: 2)
+        for candidate in rows.prefix(6) where !approve.exists {
+            for _ in 0..<2 where !approve.exists {
+                button("Home").hover()
+                usleep(300_000)
+                candidate.hover()
+                approve = app.buttons["Approve"].firstMatch
+                _ = approve.waitForExistence(timeout: 1.5)
+            }
         }
+        let row = rows.first
         _ = row
         shot("16-menubar-hover")
         print("MENU-DEBUG rows \(rows.count): \(rows.prefix(8).map { "\($0.label.prefix(40)) @\(Int($0.frame.minX)),\(Int($0.frame.minY))" })")

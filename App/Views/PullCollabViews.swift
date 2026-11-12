@@ -421,7 +421,7 @@ struct JiraCard: View {
                             .buttonStyle(.plain).help("\(entry.branch) is checked out in \(entry.repo.name)")
                         }
                         if work.pulls.isEmpty && work.branches.isEmpty && !issue.done {
-                            Button("Start Work") {
+                            Button("Create Branch…") {
                                 model.startWorkName = "chore/\(issue.key)"
                                 model.sheet = .startWork(preselected: nil)
                             }

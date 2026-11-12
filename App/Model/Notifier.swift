@@ -102,11 +102,52 @@ extension AppModel {
     /// minutes. What was already announced is remembered across launches;
     /// the very first run only remembers.
     func checkForNews() async {
+        let before = myPulls
         await refreshInbox()
         await refreshMyPulls()
         var seen = Set(defaults.stringArray(forKey: "notified") ?? [])
         let firstRun = defaults.object(forKey: "notified") == nil
         var fresh: [String] = []
+
+        if notifyMyPulls {
+            // What reviewers did to the user's own pull requests.
+            for pull in myPulls {
+                if pull.approvals > 0 {
+                    let key = "approved:\(pull.id)@\(pull.approvals)"
+                    if !seen.contains(key) {
+                        fresh.append(key)
+                        if !firstRun {
+                            Notifier.shared.post(id: key, title: pull.ready ? "Approved, ready to merge · \(pull.repoFullName)" : "Approved · \(pull.repoFullName)",
+                                                 body: "#\(pull.number) \(pull.title)\(pull.approvals > 1 ? " — \(pull.approvals) approvals" : "")",
+                                                 host: pull.host, fullName: pull.repoFullName, number: pull.number, url: pull.htmlURL)
+                        }
+                    }
+                }
+                if pull.changesRequested {
+                    let key = "changes:\(pull.id)@\(pull.headSHA)"
+                    if !seen.contains(key) {
+                        fresh.append(key)
+                        if !firstRun {
+                            Notifier.shared.post(id: key, title: "Changes requested · \(pull.repoFullName)", body: "#\(pull.number) \(pull.title)",
+                                                 host: pull.host, fullName: pull.repoFullName, number: pull.number, url: pull.htmlURL)
+                        }
+                    }
+                }
+            }
+            // Gone from the open ones: merged (by someone) or closed.
+            if !firstRun {
+                let open = Set(myPulls.map(\.id))
+                for pull in before where !open.contains(pull.id) {
+                    guard let slug = Self.slug(host: pull.host, fullName: pull.repoFullName), let client = client(for: pull.host),
+                          let now = try? await client.pullRequest(slug, number: pull.number), now.state != "open" else { continue }
+                    let key = "closed:\(pull.id)"
+                    guard !seen.contains(key) else { continue }
+                    fresh.append(key)
+                    Notifier.shared.post(id: key, title: now.merged == true ? "Merged · \(pull.repoFullName)" : "Closed · \(pull.repoFullName)",
+                                         body: "#\(pull.number) \(pull.title)", host: pull.host, fullName: pull.repoFullName, number: pull.number, url: pull.htmlURL)
+                }
+            }
+        }
 
         if notifyReviews {
             for item in inbox {
@@ -149,6 +190,11 @@ extension AppModel {
             seen.formUnion(fresh)
             defaults.set(Array(seen.suffix(800)), forKey: "notified")
         }
+    }
+
+    var notifyMyPulls: Bool {
+        get { _ = settingsRevision; return defaults.object(forKey: "notifyMyPulls") as? Bool ?? true }
+        set { guard newValue != notifyMyPulls else { return }; defaults.set(newValue, forKey: "notifyMyPulls"); settingsRevision += 1 }
     }
 
     var notifyReviews: Bool {

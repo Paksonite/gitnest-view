@@ -26,6 +26,11 @@ targets:
     dependencies:
       - package: Sparkle
     settings:
+      configs:
+        # A development build next to the installed app: its own identity,
+        # so tests and scripts never touch (or quit) the copy in use.
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: pl.paksonite.gitnest-view.debug
       base:
         PRODUCT_NAME: GitNest View
         PRODUCT_MODULE_NAME: GitNestView

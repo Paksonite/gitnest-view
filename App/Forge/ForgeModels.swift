@@ -504,6 +504,19 @@ struct Workflow: Identifiable, Hashable, Sendable {
 }
 
 /// A branch protection rule; only what the Reviews card needs.
+struct BranchInfo: Decodable, Hashable, Sendable {
+    var name: String
+    var protected: Bool?
+    var requiredApprovals: Int?
+    var userCanMerge: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case name, protected
+        case requiredApprovals = "required_approvals"
+        case userCanMerge = "user_can_merge"
+    }
+}
+
 struct BranchProtection: Decodable, Hashable, Sendable {
     var ruleName: String?
     var branchName: String?

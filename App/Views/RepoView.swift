@@ -43,7 +43,8 @@ struct RepoView: View {
         .onChange(of: model.pendingPull, initial: true) {
             // Overview and Pull requests both show the pull request; switching
             // between them here would race with the one that is showing it.
-            if model.pendingPull != nil, tab != .overview, tab != .pulls { tab = .pulls }
+            // A pull request to show: it is shown in Pull requests.
+            if model.pendingPull != nil, tab != .pulls { tab = .pulls }
         }
         .task {
             if let wanted = model.initialTab.flatMap({ name in RepoTab.allCases.first { $0.rawValue.lowercased().hasPrefix(name.lowercased()) } }) {
@@ -131,7 +132,11 @@ struct RepoView: View {
             } else if !state.loaded {
                 ProgressView().controlSize(.small)
             } else {
-                PullBrowser(repo: repo, forge: state, overview: tab == .overview).id(tab)
+                if tab == .overview {
+                    OverviewView(repo: repo, forge: state)
+                } else {
+                    PullBrowser(repo: repo, forge: state)
+                }
             }
         case .actions:
             if !state.loaded {

@@ -21,6 +21,7 @@ struct SheetLayer: View {
                         case .reword(let repo, let commit): RewordSheet(repo: repo, commit: commit)
                         case .newTag(let repo, let rev, let label): NewTagSheet(repo: repo, rev: rev, label: label)
                         case .pullAll: PullAllSheet()
+                        case .getAll: GetAllSheet()
                         case .startWork(let preselected): StartWorkSheet(preselected: preselected)
                         case .openPulls(let branch): OpenPullsSheet(branch: branch)
                         case .review(let repo, let pull): ReviewSheet(repo: repo, pull: pull)
@@ -565,6 +566,60 @@ struct RewordSheet: View {
 
 /// Fetches every clone of the workspace, then offers to fast-forward the
 /// branches that are behind, like gitnest's pull all.
+/// Everything of the workspace, here and current: what is not cloned is
+/// cloned, then what is behind the server is pulled.
+struct GetAllSheet: View {
+    @Environment(AppModel.self) private var model
+    @State private var done: Set<ForgeRepo.ID> = []
+    @State private var working = false
+
+    var body: some View {
+        let missing = model.repos.filter { model.clone(of: $0) == nil && $0.empty != true }
+        let cloned = model.repos.count { model.clone(of: $0) != nil }
+        SheetFrame(title: "Get all of \(model.workspace?.title ?? "the workspace")", symbol: "square.and.arrow.down.on.square") {
+            Text("\(model.repos.count) repositories: \(cloned) cloned here, \(missing.count) not yet\(model.repos.count { $0.empty == true } > 0 ? ", \(model.repos.count { $0.empty == true }) empty" : "").")
+                .foregroundStyle(Theme.secondary)
+            if let folder = model.workdir {
+                Label("New clones go to \(folder)/\(model.workspace?.host ?? "server")/\(model.workspace?.owner ?? "owner")/", systemImage: "folder")
+                    .font(.system(size: 12)).foregroundStyle(Theme.tertiary).lineLimit(2)
+            }
+            if working {
+                ProgressView(value: Double(done.count), total: Double(max(1, missing.count + done.count)))
+                Text("Cloned \(done.count)…").font(.system(size: 12)).foregroundStyle(Theme.secondary).monospacedDigit()
+            } else if !missing.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(missing) { repo in
+                            Label(repo.name, systemImage: "arrow.down.circle").font(.system(size: 12))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 180)
+            }
+            Text("Then every clone is fetched, and the branches behind the server are pulled (fast-forward only: nothing of yours is changed).")
+                .font(.system(size: 12)).foregroundStyle(Theme.tertiary).fixedSize(horizontal: false, vertical: true)
+        } actions: {
+            Spacer()
+            Button("Cancel") { model.sheet = nil }.buttonStyle(ChipButtonStyle()).disabled(working)
+            Button(missing.isEmpty ? "Pull All…" : working ? "Cloning…" : "Clone \(missing.count), Then Pull") { start(missing) }
+                .buttonStyle(ChipButtonStyle(prominent: true))
+                .disabled(working)
+                .keyboardShortcut(.defaultAction)
+        }
+    }
+
+    private func start(_ missing: [ForgeRepo]) {
+        guard !missing.isEmpty else { model.sheet = .pullAll; return }
+        working = true
+        Task {
+            await model.clone(missing) { repo in done.insert(repo.id) }
+            working = false
+            model.sheet = .pullAll
+        }
+    }
+}
+
 struct PullAllSheet: View {
     @Environment(AppModel.self) private var model
     @State private var phase: Phase = .fetching

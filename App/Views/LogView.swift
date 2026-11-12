@@ -11,7 +11,12 @@ struct LogPane: View {
     var onClose: (() -> Void)?
     @State private var follower = LogFollower()
     @State private var full = false
-    @State private var follow = true
+    /// The view stays at the end while new lines come, as long as the reader
+    /// is there; scrolling up lets go, scrolling back to the end holds on again.
+    @State private var stick = true
+    @State private var viewport: CGFloat = 0
+    @State private var contentHeight: CGFloat = 0
+    @State private var jump = 0
     /// Steps the reader opened or closed by hand; the rest follow `opensByItself`.
     @State private var chosen: [Int: Bool] = [:]
 
@@ -44,11 +49,45 @@ struct LogPane: View {
                                 }
                             }
                             Color.clear.frame(height: 1).id("end")
+                                .background(GeometryReader { end in
+                                    Color.clear.preference(key: LogMetrics.self, value: LogMetrics.Value(end: end.frame(in: .named("logScroll")).maxY))
+                                })
+                        }
+                        .background(GeometryReader { content in
+                            Color.clear.preference(key: LogMetrics.self, value: LogMetrics.Value(content: content.size.height))
+                        })
+                    }
+                    .coordinateSpace(name: "logScroll")
+                    .background(GeometryReader { box in
+                        Color.clear.onAppear { viewport = box.size.height }.onChange(of: box.size.height) { _, height in viewport = height }
+                    })
+                    .onPreferenceChange(LogMetrics.self) { metrics in
+                        if abs(metrics.content - contentHeight) < 0.5 {
+                            // Same text, the end moved: the reader scrolled.
+                            stick = metrics.end <= viewport + 24
+                        } else {
+                            contentHeight = metrics.content
+                            if stick { jump += 1 }
                         }
                     }
-                    .onChange(of: follower.lines.count) {
-                        if follow, follower.live { proxy.scrollTo("end", anchor: .bottom) }
+                    .onChange(of: jump) {
+                        // After this layout pass, when the new height is known.
+                        DispatchQueue.main.async { proxy.scrollTo("end", anchor: .bottom) }
                     }
+                    .overlay(alignment: .bottomTrailing) {
+                        if !stick {
+                            Button("Jump to the End", systemImage: "arrow.down.to.line") {
+                                stick = true
+                                jump += 1
+                            }
+                            .buttonStyle(ChipButtonStyle(prominent: true))
+                            .shadow(color: .black.opacity(0.3), radius: 8, y: 3)
+                            .padding(14)
+                            .transition(.opacity.combined(with: .offset(y: 8)))
+                            .help("Follow the newest lines again")
+                        }
+                    }
+                    .animation(Motion.hover, value: stick)
                 }
             }
         }
@@ -70,13 +109,9 @@ struct LogPane: View {
                 Label(error, systemImage: "exclamationmark.triangle").font(.system(size: 11.5)).foregroundStyle(Theme.red).lineLimit(1)
             }
             if follower.live {
-                Button {
-                    follow.toggle()
-                } label: {
-                    Label("Follow", systemImage: follow ? "arrow.down.to.line" : "pause")
-                }
-                .buttonStyle(ChipButtonStyle())
-                .help(follow ? "Following the end of the log; click to stop" : "Click to follow the end of the log")
+                Label(stick ? "Following" : "Paused", systemImage: stick ? "arrow.down.to.line" : "pause")
+                    .font(.system(size: 11.5)).foregroundStyle(stick ? Theme.green : Theme.secondary)
+                    .help(stick ? "New lines scroll into view; scroll up to stop" : "Scrolled up: new lines do not move the view. Scroll to the end to follow again")
             }
             Segments(options: [(false, "Summary"), (true, "Full log")], selection: $full)
                 .help("Summary hides the runner's own lines and shows one line per Terraform resource")
@@ -120,6 +155,22 @@ struct LogPane: View {
         if !withTerraform.isEmpty { return withTerraform.last?.id == log.id }
         let work = steps.filter { !["Set up job", "Complete job"].contains($0.step.name) && !$0.lines.isEmpty }
         return work.last?.id == log.id
+    }
+}
+
+/// Where the log's end is in its scroll view, and how tall the text is.
+private struct LogMetrics: PreferenceKey {
+    struct Value: Equatable {
+        var end: CGFloat = 0
+        var content: CGFloat = 0
+    }
+
+    static let defaultValue = Value()
+
+    static func reduce(value: inout Value, nextValue: () -> Value) {
+        let next = nextValue()
+        if next.end != 0 { value.end = next.end }
+        if next.content != 0 { value.content = next.content }
     }
 }
 

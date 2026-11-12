@@ -22,8 +22,9 @@ struct HomeView: View {
                 Button("Fetch All", systemImage: "arrow.clockwise") { Task { await model.fetchAllReporting(); await load() } }
                     .buttonStyle(ChipButtonStyle())
                     .disabled(model.fetchingAll)
-                Button("Pull All…", systemImage: "arrow.down.circle") { model.sheet = .pullAll }
+                Button("Get All…", systemImage: "square.and.arrow.down.on.square") { model.sheet = .getAll }
                     .buttonStyle(ChipButtonStyle())
+                    .help("Clone every repository of \(model.workspace?.title ?? "the workspace") that is not here yet, then pull the rest")
                 Button("Releases…", systemImage: "paperplane") { model.sheet = .releases }
                     .buttonStyle(ChipButtonStyle())
                     .help("What waits on develop in every repository")
@@ -175,7 +176,7 @@ struct HomeView: View {
         case .repo(let repo, let reason):
             repoAction(repo, reason)
         case .ticket(let issue):
-            Button("Start Work") {
+            Button("Create Branch…") {
                 model.startWorkName = "chore/\(issue.key)"
                 model.sheet = .startWork(preselected: nil)
             }

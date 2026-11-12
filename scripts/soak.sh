@@ -44,7 +44,8 @@ for i in $(seq 1 "$launches"); do
   start "$out/launch-$i.log"
   sleep 6
   # A polite quit, the way ⌘Q does it; a kill only if that is not possible.
-  osascript -e 'tell application id "pl.paksonite.gitnest-view" to quit' >/dev/null 2>&1 || kill -TERM "$pid"
+  # The debug build's own identity: the installed app is left alone.
+  osascript -e 'tell application id "pl.paksonite.gitnest-view.debug" to quit' >/dev/null 2>&1 || kill -TERM "$pid"
   for _ in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
   if kill -0 "$pid" 2>/dev/null; then echo "  launch $i did not quit"; kill -KILL "$pid"; failed=1; fi
   wait "$pid" 2>/dev/null || true

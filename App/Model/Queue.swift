@@ -76,7 +76,7 @@ extension AppModel {
             let work = work(for: issue)
             guard work.branches.isEmpty, work.pulls.isEmpty else { continue }
             items.append(TodoItem(id: "ticket:\(issue.key)", rank: 20, title: issue.fields.summary,
-                                  detail: "\(issue.key) · in progress, no branch or pull request yet", action: .ticket(issue)))
+                                  detail: "\(issue.key) · \(issue.fields.status.name) in Jira, no branch or pull request for it yet", action: .ticket(issue)))
         }
         return items.sorted { $0.rank != $1.rank ? $0.rank < $1.rank : $0.id < $1.id }
     }

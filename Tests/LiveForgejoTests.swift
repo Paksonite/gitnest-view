@@ -495,6 +495,53 @@ final class LiveForgejoTests: XCTestCase {
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 204)
     }
 
+    /// The user hears when a reviewer approves their pull request, and when
+    /// someone else merges it.
+    @MainActor
+    func testNotifiesApprovalAndMergeOfMyPullRequest() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["GNV_WRITE"] == "1", let reviewerToken = env["GNV_REVIEWER_TOKEN"],
+              let lab = env["GNV_LAB_REPO"]?.split(separator: "/").map(String.init), lab.count == 2 else {
+            throw XCTSkip("GNV_WRITE, GNV_REVIEWER_TOKEN and GNV_LAB_REPO are not set")
+        }
+        let suite = "gnv-live-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let model = AppModel(tokens: MemoryTokenStore(), defaults: defaults)
+        model.setWorkdir(FileManager.default.temporaryDirectory)
+        try await model.connect(host: slug.host, token: try XCTUnwrap(env["GNV_TOKEN"]))
+        var posted: [UNNotificationRequest] = []
+        Notifier.shared.deliver = { posted.append($0) }
+        defer { Notifier.shared.deliver = nil }
+        await model.checkForNews()
+        posted.removeAll()
+
+        // A pull request of mine, a review asked of the reviewer.
+        let mine = ForgejoClient(host: slug.host, token: try XCTUnwrap(env["GNV_TOKEN"]))
+        let reviewer = ForgejoClient(host: slug.host, token: reviewerToken)
+        let labSlug = RepoSlug(host: slug.host, owner: lab[0], name: lab[1])
+        let branch = "test/approve-\(Int(Date().timeIntervalSince1970))"
+        let number = try await LabHelper.openPull(mine, labSlug, branch: branch, reviewer: "lab-reviewer")
+        await model.checkForNews()
+        XCTAssertFalse(posted.contains { $0.identifier.hasPrefix("approved:") }, "nothing approved yet")
+
+        // Approved: told once, with the server.
+        let pull = try await reviewer.pullRequest(labSlug, number: number)
+        try await reviewer.submitReview(labSlug, number: number, event: "APPROVED", body: "fine", commit: pull.head.sha)
+        await model.checkForNews()
+        let approved = posted.filter { $0.identifier.hasPrefix("approved:") && $0.content.body.contains("#\(number)") }
+        XCTAssertEqual(approved.count, 1, posted.map(\.content.title).joined(separator: "; "))
+        XCTAssertEqual(approved.first?.content.subtitle, slug.host)
+        await model.checkForNews()
+        XCTAssertEqual(posted.filter { $0.identifier.hasPrefix("approved:") && $0.content.body.contains("#\(number)") }.count, 1, "told once")
+
+        // Someone else merges it: told it is merged.
+        try await LabHelper.close(reviewer, labSlug, pull: number, branch: branch, merge: true)
+        await model.checkForNews()
+        XCTAssertTrue(posted.contains { $0.identifier.hasPrefix("closed:") && $0.content.title.hasPrefix("Merged") && $0.content.body.contains("#\(number)") },
+                      posted.map(\.content.title).joined(separator: "; "))
+    }
+
     /// The conversation and the upkeep of a pull request, on a fresh one
     /// in the lab: comment, ask for a review and take it back, draft, edit,
     /// update the branch, close and reopen.
@@ -691,7 +738,12 @@ enum LabHelper {
         return number
     }
 
-    static func close(_ client: ForgejoClient, _ repo: RepoSlug, pull: Int, branch: String) async throws {
+    static func close(_ client: ForgejoClient, _ repo: RepoSlug, pull: Int, branch: String, merge: Bool = false) async throws {
+        if merge {
+            let pr = try await client.pullRequest(repo, number: pull)
+            try await client.merge(repo, number: pull, style: "merge", deleteBranch: true, head: pr.head.sha, title: nil)
+            return
+        }
         let closed = try JSONSerialization.data(withJSONObject: ["state": "closed"])
         _ = try await request(client, "PATCH", "repos/\(repo.owner)/\(repo.name)/pulls/\(pull)", closed)
         _ = try? await request(client, "DELETE", "repos/\(repo.owner)/\(repo.name)/branches/\(branch)", nil)
