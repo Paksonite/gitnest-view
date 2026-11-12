@@ -147,7 +147,18 @@ final class CloneEdgeCaseTests: XCTestCase {
         let gone = directory
         let id = repo.id
         await drawAll("before")
-        try FileManager.default.removeItem(at: gone)
+        // The views may still have git at work in the folder (a lock file
+        // appears and goes): removing it can need a second try.
+        var removed = false
+        for _ in 0..<20 where !removed {
+            do {
+                try FileManager.default.removeItem(at: gone)
+                removed = true
+            } catch {
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: gone.path), "the folder could not be removed")
         await app.model.refreshLocal()
         let same = try XCTUnwrap(app.model.repos.first { $0.id == id })
         XCTAssertNil(app.model.clone(of: same), "a deleted folder must stop being a clone")
