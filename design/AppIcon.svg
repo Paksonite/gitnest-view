@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1B1838"/>
+      <stop offset="1" stop-color="#0B0A1A"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.62" r="0.55">
+      <stop offset="0" stop-color="#34E08A" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#34E08A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- macOS icon grid: an 824 pt rounded square on a 1024 pt canvas -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#glow)"/>
+  <rect x="101.500" y="101.500" width="821" height="821" rx="184.500" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="3"/>
+  <g transform="translate(212 196) scale(5)" fill="none" stroke="#34E08A" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M61 64 C60 54 60 46 62 38"/>
+    <path d="M62 38 C62 23 72 12 90 9 C91 26 80 37 62 38 Z" fill="#34E08A" stroke-width="3"/>
+    <path d="M61 42 C50 42 42 35 40 23 C52 23 60 31 61 42 Z" fill="#34E08A" stroke-width="3"/>
+    <ellipse cx="60" cy="66" rx="46" ry="13"/>
+    <path d="M14 66 C14 90 36 108 60 108 C84 108 106 90 106 66"/>
+    <path d="M30 68 C42 74 78 74 90 68"/>
+    <path d="M17 78 C40 90 80 90 103 78"/>
+    <path d="M25 91 C45 101 75 101 95 91"/>
+    <path d="M33 80 C44 90 54 99 62 107"/>
+    <path d="M88 80 C78 90 70 98 62 104"/>
+  </g>
+</svg>

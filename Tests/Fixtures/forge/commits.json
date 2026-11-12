@@ -1,0 +1,211 @@
+[
+ {
+  "url": "https://forge.example.test/api/v1/repos/Lab-GCP/org-core-iam/git/commits/20fc97d11ea81ed7cd20226c62e0df8507960a21",
+  "sha": "20fc97d11ea81ed7cd20226c62e0df8507960a21",
+  "created": "2026-11-10T22:42:12Z",
+  "html_url": "https://forge.example.test/Lab-GCP/org-core-iam/commit/20fc97d11ea81ed7cd20226c62e0df8507960a21",
+  "commit": {
+   "url": "https://forge.example.test/api/v1/repos/Lab-GCP/org-core-iam/git/commits/20fc97d11ea81ed7cd20226c62e0df8507960a21",
+   "author": {
+    "name": "claude",
+    "email": "user@example.test",
+    "date": "2026-11-10T22:42:12Z"
+   },
+   "committer": {
+    "name": "claude",
+    "email": "user@example.test",
+    "date": "2026-11-10T22:42:12Z"
+   },
+   "message": "Merge branch 'develop' into feat/INFRA-77-broken-acl\n",
+   "tree": {
+    "url": "https://forge.example.test/api/v1/repos/Lab-GCP/org-core-iam/git/trees/20fc97d11ea81ed7cd20226c62e0df8507960a21",
+    "sha": "20fc97d11ea81ed7cd20226c62e0df8507960a21",
+    "created": "2026-11-10T22:42:12Z"
+   },
+   "verification": {
+    "verified": false,
+    "reason": "gpg.error.not_signed_commit",
+    "signature": "",
+    "signer": null,
+    "payload": ""
+   }
+  },
+  "author": {
+   "id": 3,
+   "login": "claude",
+   "login_name": "",
+   "source_id": 0,
+   "full_name": "",
+   "email": "user@example.test",
+   "avatar_url": "https://forge.example.test/avatars/67a9bd8ec0268c45d4ca0113a59c7a53",
+   "html_url": "https://forge.example.test/claude",
+   "language": "",
+   "is_admin": false,
+   "last_login": "0001-01-01T00:00:00Z",
+   "created": "2026-11-10T18:08:22Z",
+   "restricted": false,
+   "active": false,
+   "prohibit_login": false,
+   "location": "",
+   "pronouns": "",
+   "website": "",
+   "description": "",
+   "visibility": "public",
+   "followers_count": 0,
+   "following_count": 0,
+   "starred_repos_count": 0,
+   "username": "claude"
+  },
+  "committer": {
+   "id": 3,
+   "login": "claude",
+   "login_name": "",
+   "source_id": 0,
+   "full_name": "",
+   "email": "user@example.test",
+   "avatar_url": "https://forge.example.test/avatars/67a9bd8ec0268c45d4ca0113a59c7a53",
+   "html_url": "https://forge.example.test/claude",
+   "language": "",
+   "is_admin": false,
+   "last_login": "0001-01-01T00:00:00Z",
+   "created": "2026-11-10T18:08:22Z",
+   "restricted": false,
+   "active": false,
+   "prohibit_login": false,
+   "location": "",
+   "pronouns": "",
+   "website": "",
+   "description": "",
+   "visibility": "public",
+   "followers_count": 0,
+   "following_count": 0,
+   "starred_repos_count": 0,
+   "username": "claude"
+  },
+  "parents": [
+   {
+    "url": "https://forge.example.test/api/v1/repos/Lab-GCP/org-core-iam/git/commits/8f3915fbf15d8d8707e3e76e4d000d46cece74b4",
+    "sha": "8f3915fbf15d8d8707e3e76e4d000d46cece74b4",
+    "created": "0001-01-01T00:00:00Z"
+   },
+   {
+    "url": "https://forge.example.test/api/v1/repos/Lab-GCP/org-core-iam/git/commits/c87cb45918971796b2a8be45fbe4b2c040d825a4",
+    "sha": "c87cb45918971796b2a8be45fbe4b2c040d825a4",
+    "created": "0001-01-01T00:00:00Z"
+   }
+  ],
+  "files": [
+   {
+    "filename": ".forgejo/workflows/terraform.yaml",
+    "status": "added"
+   }
+  ],
+  "stats": {
+   "total": 0,
+   "additions": 0,
+   "deletions": 0
+  }
+ },
+ {
+  "url": "https://forge.example.test/api/v1/repos/Lab-GCP/org-core-iam/git/commits/8f3915fbf15d8d8707e3e76e4d000d46cece74b4",
+  "sha": "8f3915fbf15d8d8707e3e76e4d000d46cece74b4",
+  "created": "2026-11-10T22:29:21Z",
+  "html_url": "https://forge.example.test/Lab-GCP/org-core-iam/commit/8f3915fbf15d8d8707e3e76e4d000d46cece74b4",
+  "commit": {
+   "url": "https://forge.example.test/api/v1/repos/Lab-GCP/org-core-iam/git/commits/8f3915fbf15d8d8707e3e76e4d000d46cece74b4",
+   "author": {
+    "name": "claude",
+    "email": "user@example.test",
+    "date": "2026-11-10T22:29:21Z"
+   },
+   "committer": {
+    "name": "claude",
+    "email": "user@example.test",
+    "date": "2026-11-10T22:29:21Z"
+   },
+   "message": "feat: INFRA-77 bind the deploy SA\n",
+   "tree": {
+    "url": "https://forge.example.test/api/v1/repos/Lab-GCP/org-core-iam/git/trees/8f3915fbf15d8d8707e3e76e4d000d46cece74b4",
+    "sha": "8f3915fbf15d8d8707e3e76e4d000d46cece74b4",
+    "created": "2026-11-10T22:29:21Z"
+   },
+   "verification": {
+    "verified": false,
+    "reason": "gpg.error.not_signed_commit",
+    "signature": "",
+    "signer": null,
+    "payload": ""
+   }
+  },
+  "author": {
+   "id": 3,
+   "login": "claude",
+   "login_name": "",
+   "source_id": 0,
+   "full_name": "",
+   "email": "user@example.test",
+   "avatar_url": "https://forge.example.test/avatars/67a9bd8ec0268c45d4ca0113a59c7a53",
+   "html_url": "https://forge.example.test/claude",
+   "language": "",
+   "is_admin": false,
+   "last_login": "0001-01-01T00:00:00Z",
+   "created": "2026-11-10T18:08:22Z",
+   "restricted": false,
+   "active": false,
+   "prohibit_login": false,
+   "location": "",
+   "pronouns": "",
+   "website": "",
+   "description": "",
+   "visibility": "public",
+   "followers_count": 0,
+   "following_count": 0,
+   "starred_repos_count": 0,
+   "username": "claude"
+  },
+  "committer": {
+   "id": 3,
+   "login": "claude",
+   "login_name": "",
+   "source_id": 0,
+   "full_name": "",
+   "email": "user@example.test",
+   "avatar_url": "https://forge.example.test/avatars/67a9bd8ec0268c45d4ca0113a59c7a53",
+   "html_url": "https://forge.example.test/claude",
+   "language": "",
+   "is_admin": false,
+   "last_login": "0001-01-01T00:00:00Z",
+   "created": "2026-11-10T18:08:22Z",
+   "restricted": false,
+   "active": false,
+   "prohibit_login": false,
+   "location": "",
+   "pronouns": "",
+   "website": "",
+   "description": "",
+   "visibility": "public",
+   "followers_count": 0,
+   "following_count": 0,
+   "starred_repos_count": 0,
+   "username": "claude"
+  },
+  "parents": [
+   {
+    "url": "https://forge.example.test/api/v1/repos/Lab-GCP/org-core-iam/git/commits/b78826ca93278a9c74342c6c6060988c2ed692e9",
+    "sha": "b78826ca93278a9c74342c6c6060988c2ed692e9",
+    "created": "0001-01-01T00:00:00Z"
+   }
+  ],
+  "files": [
+   {
+    "filename": "iam.tf",
+    "status": "added"
+   }
+  ],
+  "stats": {
+   "total": 3,
+   "additions": 3,
+   "deletions": 0
+  }
+ }
+]
