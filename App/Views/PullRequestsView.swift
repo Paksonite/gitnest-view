@@ -304,6 +304,14 @@ struct PullDetail: View {
                     }
                 }
                 PullMenu(repo: repo, pull: pull)
+                Button("Copy Link", systemImage: "link") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(pull.htmlURL, forType: .string)
+                    model.toast("Copied the link to #\(pull.number): \(pull.htmlURL)")
+                }
+                .buttonStyle(ChipButtonStyle())
+                .fixedSize()
+                .help("Copy the pull request's address, to send it to someone for approval")
                 if let url = URL(string: pull.htmlURL) {
                     Button("Open in Browser", systemImage: "arrow.up.right.square") { openExternal(url) }
                         .labelStyle(.iconOnly)

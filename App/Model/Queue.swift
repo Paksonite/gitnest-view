@@ -73,10 +73,15 @@ extension AppModel {
                                   action: .review(item)))
         }
         for issue in jira.issues where issue.inProgress {
+            // A ticket often needs work in several repositories: it stays
+            // while it is in progress, with what has been started for it.
             let work = work(for: issue)
-            guard work.branches.isEmpty, work.pulls.isEmpty else { continue }
+            var started: [String] = []
+            if !work.branches.isEmpty { started.append("\(work.branches.count) \(work.branches.count == 1 ? "branch" : "branches")") }
+            if !work.pulls.isEmpty { started.append("\(work.pulls.count) pull \(work.pulls.count == 1 ? "request" : "requests")") }
             items.append(TodoItem(id: "ticket:\(issue.key)", rank: 20, title: issue.fields.summary,
-                                  detail: "\(issue.key) · \(issue.fields.status.name) in Jira, no branch or pull request for it yet", action: .ticket(issue)))
+                                  detail: "\(issue.key) · \(issue.fields.status.name) in Jira · " + (started.isEmpty ? "nothing started yet" : started.joined(separator: ", ")),
+                                  action: .ticket(issue)))
         }
         return items.sorted { $0.rank != $1.rank ? $0.rank < $1.rank : $0.id < $1.id }
     }

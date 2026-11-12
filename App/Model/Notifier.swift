@@ -29,7 +29,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func requestAccess() {
         guard !asked, !Self.quiet else { return }
         asked = true
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+        // The async form: macOS answers on a queue of its own, and a callback
+        // made here would be bound to the main actor and stop the app there.
+        Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
     }
 
     func post(id: String, title: String, body: String, host: String, fullName: String, number: Int, url: String?) {

@@ -209,7 +209,8 @@ struct SidebarView: View {
                     NavRow(title: "Repositories", symbol: "books.vertical", selected: model.section == .repositories) {
                         model.section = .repositories
                     }
-                    NavRow(title: "Inbox", symbol: "tray", count: model.inbox.count + model.myPulls.count { $0.state == .failure || $0.changesRequested }, selected: model.section == .inbox) {
+                    NavRow(title: "Inbox", symbol: "tray", count: model.inbox.count + model.myPulls.count, badge: true,
+                           dot: model.unreadCount > 0, selected: model.section == .inbox) {
                         model.section = .inbox
                     }
                     NavRow(title: "Search", symbol: "text.magnifyingglass", selected: model.section == .search) {
@@ -409,13 +410,23 @@ struct NavRowLabel: View {
     let title: String
     let symbol: String
     let count: Int
+    /// The count drawn as a filled badge: things wait there.
+    var badge = false
+    /// Something new since the user last looked.
+    var dot = false
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: symbol).frame(width: 16).foregroundStyle(Theme.secondary)
             Text(title)
             Spacer()
-            if count > 0 {
+            if dot { Circle().fill(Theme.blue).frame(width: 6, height: 6).help("New since you last looked") }
+            if count > 0, badge {
+                Text("\(count)").font(.system(size: 10.5, weight: .bold)).foregroundStyle(.white).monospacedDigit()
+                    .padding(.horizontal, 6).frame(minWidth: 18, minHeight: 16)
+                    .background(Theme.orange, in: Capsule())
+                    .help("\(count) waiting: reviews asked of you and your open pull requests")
+            } else if count > 0 {
                 Text("\(count)").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.secondary).monospacedDigit()
             }
         }
@@ -429,12 +440,14 @@ struct NavRow: View {
     let title: String
     let symbol: String
     var count = 0
+    var badge = false
+    var dot = false
     let selected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            NavRowLabel(title: title, symbol: symbol, count: count)
+            NavRowLabel(title: title, symbol: symbol, count: count, badge: badge, dot: dot)
         }
         .buttonStyle(.plain)
         .hoverBackground(selected: selected)

@@ -114,13 +114,13 @@ struct ChangesView: View {
                     ForEach(conflicts) { row($0, staged: false) }
                 }
                 if !staged.isEmpty {
-                    section("Staged", count: staged.count, action: ("Unstage All", "minus.circle", {
+                    section("In the next commit", count: staged.count, tint: Theme.green, action: ("Unstage All", "minus.circle", {
                         Task { await model.unstage([], all: true, in: repo) }
                     }))
                     ForEach(staged) { row($0, staged: true) }
                 }
                 if !unstaged.isEmpty {
-                    section("Changes", count: unstaged.count, action: ("Stage All", "plus.circle", {
+                    section("Not in the commit", count: unstaged.count, action: ("Stage All", "plus.circle", {
                         Task { await model.stage([], all: true, in: repo) }
                     }))
                     ForEach(unstaged) { row($0, staged: false) }
@@ -152,10 +152,10 @@ struct ChangesView: View {
         }
     }
 
-    private func section(_ title: String, count: Int, action: (String, String, () -> Void)?) -> some View {
+    private func section(_ title: String, count: Int, tint: Color = Theme.tertiary, action: (String, String, () -> Void)?) -> some View {
         HStack(spacing: 6) {
-            Text(title.uppercased()).font(.system(size: 10.5, weight: .semibold)).kerning(0.5).foregroundStyle(Theme.tertiary)
-            Text("\(count)").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary).monospacedDigit()
+            Text(title.uppercased()).font(.system(size: 10.5, weight: .semibold)).kerning(0.5).foregroundStyle(tint)
+            Text("\(count)").font(.system(size: 10.5)).foregroundStyle(tint).monospacedDigit()
             Spacer()
             if let action {
                 Button(action.0, systemImage: action.1, action: action.2)
@@ -255,13 +255,30 @@ private struct FileRow: View {
         let name = (file.path as NSString).lastPathComponent
         let folder = (file.path as NSString).deletingLastPathComponent
         HStack(spacing: 8) {
+            if !file.conflict {
+                // In the commit or not, at a glance; a click changes it.
+                Button(action: toggle) {
+                    Image(systemName: staged ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 13))
+                        .foregroundStyle(staged ? Theme.green : Theme.tertiary)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(staged ? "In the next commit — click to take it out" : "Not in the commit — click to add it")
+                .accessibilityLabel(staged ? "In the next commit" : "Not in the commit")
+            }
             Text(letter)
                 .font(.system(size: 10.5, weight: .bold, design: .monospaced))
                 .foregroundStyle(color)
                 .frame(width: 16, height: 16)
                 .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
             HStack(spacing: 5) {
-                Text(name).lineLimit(1)
+                Text(name).lineLimit(1).foregroundStyle(staged ? Theme.text : Theme.secondary)
+                if !staged, file.staged {
+                    Badge(text: "partly in", color: Theme.green, filled: false)
+                        .help("Some of this file's changes are in the next commit, the rest are not")
+                }
                 if !folder.isEmpty {
                     Text(folder).font(.system(size: 11)).foregroundStyle(Theme.tertiary).lineLimit(1).truncationMode(.head)
                 }
@@ -279,6 +296,7 @@ private struct FileRow: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 28)
+        .background(staged ? Theme.green.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 5))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { if !file.conflict { toggle() } }
         .simultaneousGesture(TapGesture().onEnded { select() })
