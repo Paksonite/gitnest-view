@@ -31,6 +31,7 @@ cask, and Sparkle ignores them because its feed is the latest full release.
 ## How users get it
 
 ```bash
+brew trust paksonite/tap        # once: newer Homebrew refuses untrusted third-party taps
 brew install --cask paksonite/tap/gitnest-view
 ```
 

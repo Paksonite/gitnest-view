@@ -7,7 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${GNV_UI_HOST:?set GNV_UI_HOST}" "${GNV_UI_TOKEN:?set GNV_UI_TOKEN}" "${GNV_UI_WORKDIR:?set GNV_UI_WORKDIR}"
-for name in HOST TOKEN WORKDIR WORKSPACE LOGIN PULL_REPO TF_REPO; do
+for name in HOST TOKEN WORKDIR WORKSPACE LOGIN PULL_REPO TF_REPO FEATURE_REPO FEATURE_BRANCH RELEASE; do
   key="GNV_UI_$name"
   [[ -n "${!key:-}" ]] && export "TEST_RUNNER_$key=${!key}"
 done

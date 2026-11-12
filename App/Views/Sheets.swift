@@ -200,15 +200,16 @@ struct ReleaseSheet: View {
             }
         }
         .task {
-            head = initialHead
-            base = release ? (repo.defaultBranch ?? "main") : await model.defaultBase(for: initialHead, in: repo)
-            async let listed = model.serverBranches(repo)
-            await load()
-            branches = await listed
+            // Both branches first, then one comparison: a comparison with a
+            // branch still missing would fail and its error outlive the right one.
+            let start = initialHead
+            let target = release ? (repo.defaultBranch ?? "main") : await model.defaultBase(for: start, in: repo)
+            head = start
+            base = target
+            branches = await model.serverBranches(repo)
         }
-        // Another branch chosen from a list: compare again.
-        .onChange(of: head) { old, _ in if !old.isEmpty { Task { await load() } } }
-        .onChange(of: base) { old, _ in if !old.isEmpty { Task { await load() } } }
+        // One comparison per pair of branches; a newer pair cancels the older one.
+        .task(id: Pair(head: head, base: base)) { await load() }
     }
 
     private func commits(_ draft: ReleaseDraft) -> some View {
@@ -235,22 +236,35 @@ struct ReleaseSheet: View {
         }
     }
 
+    private struct Pair: Hashable {
+        var head: String
+        var base: String
+    }
+
     private func load() async {
+        let from = head.trimmingCharacters(in: .whitespaces), into = base.trimmingCharacters(in: .whitespaces)
+        guard !from.isEmpty, !into.isEmpty else { return }
         loading = true
-        error = nil
         defer { loading = false }
         do {
-            let fresh = try await model.releaseDraft(repo, head: head.trimmingCharacters(in: .whitespaces), base: base.trimmingCharacters(in: .whitespaces), release: release)
+            let fresh = try await model.releaseDraft(repo, head: from, base: into, release: release)
+            // Only the answer for the branches chosen now counts.
+            guard !Task.isCancelled, from == head.trimmingCharacters(in: .whitespaces), into == base.trimmingCharacters(in: .whitespaces) else { return }
+            error = nil
             draft = fresh
             title = fresh.title
             text = fresh.body
-        } catch ForgejoClient.ForgeError.notFound, ForgejoClient.ForgeError.http(500) {
-            // Some servers answer a missing branch with 500 instead of 404.
-            draft = nil
-            error = "Cannot compare: check that the branches \(head) and \(base) exist on the server."
         } catch {
+            guard !Task.isCancelled, !(error is CancellationError), from == head.trimmingCharacters(in: .whitespaces),
+                  into == base.trimmingCharacters(in: .whitespaces) else { return }
             draft = nil
-            self.error = error.localizedDescription
+            switch error {
+            case ForgejoClient.ForgeError.notFound, ForgejoClient.ForgeError.http(500):
+                // Some servers answer a missing branch with 500 instead of 404.
+                self.error = "Cannot compare: check that the branches \(from) and \(into) exist on the server."
+            default:
+                self.error = error.localizedDescription
+            }
         }
     }
 

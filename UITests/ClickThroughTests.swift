@@ -19,6 +19,18 @@ final class ClickThroughTests: XCTestCase {
         guard let host = env["GNV_UI_HOST"], let token = env["GNV_UI_TOKEN"], let workdir = env["GNV_UI_WORKDIR"] else {
             throw XCTSkip("no test server configured")
         }
+        if name.contains("ReleaseFirstRun") {
+            // Only when asked: it drives the copy in /Applications and its Keychain.
+            guard env["GNV_UI_RELEASE"] == "1" else { throw XCTSkip("GNV_UI_RELEASE=1 is not set") }
+            // The release build as a user gets it: installed in /Applications,
+            // its real identity, the Keychain, no development switches.
+            app = XCUIApplication(bundleIdentifier: "pl.paksonite.gitnest-view")
+            let folder = (env["GNV_UI_TMP"] ?? NSTemporaryDirectory()) + "/release-\(Int(Date().timeIntervalSince1970))/GitNest"
+            app.launchEnvironment = ["GNV_SUGGESTED_WORKDIR": folder]
+            app.launch()
+            XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 20))
+            return
+        }
         app = XCUIApplication()
         app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
         if name.contains("FirstRun") {
@@ -215,6 +227,67 @@ final class ClickThroughTests: XCTestCase {
         shot("14-search")
     }
 
+    /// A feature branch in a repository without develop: the form compares
+    /// it with the default branch, lists its commit, and reports no error.
+    func testNewPullRequestFromAFeatureBranch() throws {
+        let repo = try XCTUnwrap(env["GNV_UI_FEATURE_REPO"], "GNV_UI_FEATURE_REPO")
+        let branch = try XCTUnwrap(env["GNV_UI_FEATURE_BRANCH"], "GNV_UI_FEATURE_BRANCH")
+        openRepository(repo)
+        button("Pull requests").click()
+        button("New").click()
+        _ = element("New pull request in")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == %@", "From branch: \(branch)")).firstMatch.waitForExistence(timeout: 10),
+                      "the form starts from the branch checked out")
+        _ = element("1 commit", timeout: 15)
+        sleep(3) // any second comparison has answered by now
+        shot("23-feature-branch-form")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "value CONTAINS 'Cannot compare' OR label CONTAINS 'Cannot compare'")).firstMatch.exists,
+                       "a comparison error must not stand next to a good comparison")
+        button("Cancel").click()
+    }
+
+    /// The installed release on a clean Mac: intro, wizard against a test
+    /// server, the app at work, then a second launch straight into it. It
+    /// must not stop at any point (0.1.0 did, right after the first launch).
+    func testReleaseFirstRun() throws {
+        let host = try XCTUnwrap(env["GNV_UI_HOST"]), token = try XCTUnwrap(env["GNV_UI_TOKEN"])
+        let workspace = try XCTUnwrap(env["GNV_UI_WORKSPACE"])
+        button("Get Started", timeout: 15).click()
+        let server = app.textFields.firstMatch
+        XCTAssertTrue(server.waitForExistence(timeout: 5))
+        server.click()
+        server.typeText(host)
+        button("Continue").click()
+        let secret = app.secureTextFields.firstMatch
+        XCTAssertTrue(secret.waitForExistence(timeout: 10))
+        secret.click()
+        secret.typeText(token)
+        button("Connect").click()
+        _ = element("Signed in as", timeout: 20)
+        shot("50-release-token")
+        button("Continue").click()
+        button(workspace, timeout: 15).click()
+        button("Continue").click()
+        button("Use This Folder").click()
+        _ = element("Ready")
+        button("Skip the Tour").click()
+        _ = button("Home", timeout: 15)
+        // At work for a while: the inbox, notifications and pipelines are read meanwhile.
+        sleep(20)
+        XCTAssertEqual(app.state, .runningForeground, "the app stopped after the first launch")
+        shot("51-release-home")
+
+        // Again: no wizard, straight into the workspace, still alive.
+        app.terminate()
+        app.launch()
+        _ = button("Home", timeout: 20)
+        XCTAssertFalse(app.buttons["Get Started"].exists, "the setup was not remembered")
+        sleep(15)
+        XCTAssertEqual(app.state, .runningForeground, "the app stopped on the second launch")
+        shot("52-release-second-launch")
+        app.terminate()
+    }
+
     /// The first launch from the intro to the tour, then the new Settings.
     func testFirstRunWizardTourAndSettings() throws {
         let host = try XCTUnwrap(env["GNV_UI_HOST"]), token = try XCTUnwrap(env["GNV_UI_TOKEN"])
@@ -313,8 +386,16 @@ final class ClickThroughTests: XCTestCase {
         sleep(2) // the list settles once the inbox is read
         let window = app.windows.firstMatch.frame
         // The panel's rows (right half of the window); a review row offers Approve under the pointer.
-        let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS ' #'")).allElementsBoundByIndex
-            .filter { $0.frame.minX > window.midX && !$0.label.contains("your pull request") }
+        // Review rows, not the user's own ("your …"); the list fills as the inbox is read.
+        var rows: [XCUIElement] = []
+        for _ in 0..<15 where rows.isEmpty {
+            let query = app.buttons.matching(NSPredicate(format: "label CONTAINS ' #'"))
+            // The panel redraws when the inbox is read again: ask only once it has rows.
+            guard query.firstMatch.waitForExistence(timeout: 2) else { continue }
+            rows = query.allElementsBoundByIndex
+                .filter { $0.frame.minX > window.midX && !$0.label.lowercased().contains("your") }
+            if rows.isEmpty { sleep(1) }
+        }
         XCTAssertFalse(rows.isEmpty, "no review row in the menu bar panel")
         shot("15-menubar")
         var approve = app.buttons["Approve"].firstMatch

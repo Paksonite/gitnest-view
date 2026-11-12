@@ -6,13 +6,17 @@ requests, reviews, pipeline checks and live job logs of your Forgejo server.
 
 GitNest View is gitnest: its engine is gitnest's own git code.
 
-> Early development. There are no releases yet; when there are:
+> Early development. Install with Homebrew (Apple silicon, macOS 14 or newer):
 >
 > ```sh
+> brew trust paksonite/tap        # once: Homebrew asks before using a third-party tap
 > brew install --cask paksonite/tap/gitnest-view
 > ```
 >
 > or the DMG from [Releases](https://github.com/Paksonite/gitnest-view/releases).
+> The token is kept in the Keychain. The app is signed with its own
+> certificate (no Apple Team ID), so after an update macOS may ask once for
+> the login password to let the new version read it: choose Always Allow.
 > The app updates itself (GitNest View → Check for Updates…). Releasing:
 > [docs/releasing.md](docs/releasing.md).
 

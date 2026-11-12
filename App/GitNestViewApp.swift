@@ -11,6 +11,13 @@ struct GitNestViewApp: App {
         return AppModel()
     }()
 
+    init() {
+        // The app opens its own window; macOS restoring windows only gets in
+        // the way: after a crash it asks at every launch whether to reopen
+        // them, and the question blocks the start. Read before AppKit restores.
+        UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true])
+    }
+
     var body: some Scene {
         WindowGroup("GitNest View", id: "main") {
             RootView()
