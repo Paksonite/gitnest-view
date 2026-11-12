@@ -5,122 +5,115 @@ struct RootView: View {
     @Environment(\.openSettings) private var openSettings
     @State private var dropdowns = DropdownCenter()
 
+    // Split in parts: as one expression the body is more than older
+    // compilers type-check in reasonable time.
     var body: some View {
-        Group {
-            if model.isSetUp, !model.wizardOpen {
-                HStack(spacing: 0) {
-                    SidebarView()
-                        .frame(width: 264)
-                    VLine()
-                    content
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            } else {
-                WelcomeFlow()
+        stage
+            .modifier(WindowLayers())
+            .task { await launchSwitches() }
+            .coordinateSpace(name: dropdownSpace)
+            .environment(dropdowns)
+            .background(Theme.window)
+            .foregroundStyle(Theme.text)
+            .font(.system(size: 13))
+            .ignoresSafeArea()
+    }
+
+    /// The app itself, or the welcome before it is set up.
+    @ViewBuilder private var stage: some View {
+        if model.isSetUp, !model.wizardOpen {
+            HStack(spacing: 0) {
+                SidebarView()
+                    .frame(width: 264)
+                VLine()
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        } else {
+            WelcomeFlow()
         }
-        .overlay { SheetLayer() }
-        .overlay { CommandPalette() }
-        #if DEBUG
-        .overlay(alignment: .topTrailing) {
-            // Development: the menu bar panel drawn in the window, to look at it.
-            if ProcessInfo.processInfo.environment["GNV_DEV_OPEN"] == "menubar" {
-                MenuBarView().clipShape(RoundedRectangle(cornerRadius: 10)).shadow(radius: 20).padding(40)
-            }
-        }
-        #endif
-        .task {
-            // Measuring: walks the repositories like a user clicking down the
-            // sidebar and prints timings (GNV_TRACE). Reads only.
-            let env = ProcessInfo.processInfo.environment
-            if let cycle = env["GNV_DEV_CYCLE"] {
-                Task {
-                    try? await Task.sleep(for: .seconds(Double(env["GNV_DEV_CYCLE_WAIT"] ?? "") ?? 8))
-                    Trace.watchMainThread()
-                    Trace.note("cycle: \(model.repos.count) repositories")
-                    let count = Int(cycle) ?? 6
-                    let step = max(1, model.repos.count / max(1, count))
-                    let picked = stride(from: 0, to: model.repos.count, by: step).prefix(count).map { model.repos[$0] }
-                    for repo in picked {
-                        Trace.begin("select \(repo.name)")
-                        model.selection = repo.id
-                        model.section = .repositories
-                        DispatchQueue.main.async { Trace.note("main thread free again") }
-                        try? await Task.sleep(for: .seconds(4))
-                    }
-                    for repo in picked.prefix(4) {
-                        Trace.begin("select again \(repo.name)")
-                        model.selection = repo.id
-                        DispatchQueue.main.async { Trace.note("main thread free again") }
-                        try? await Task.sleep(for: .seconds(3))
-                    }
-                    Trace.begin("home")
-                    model.section = .home
-                    DispatchQueue.main.async { Trace.note("main thread free again") }
-                    try? await Task.sleep(for: .seconds(3))
-                    Trace.begin("back to a repository")
+    }
+
+    /// What the environment asks for at launch: measuring, and (in debug
+    /// builds) opening a screen to look at it.
+    private func launchSwitches() async {
+        // Measuring: walks the repositories like a user clicking down the
+        // sidebar and prints timings (GNV_TRACE). Reads only.
+        let env = ProcessInfo.processInfo.environment
+        if let cycle = env["GNV_DEV_CYCLE"] {
+            Task {
+                try? await Task.sleep(for: .seconds(Double(env["GNV_DEV_CYCLE_WAIT"] ?? "") ?? 8))
+                Trace.watchMainThread()
+                Trace.note("cycle: \(model.repos.count) repositories")
+                let count = Int(cycle) ?? 6
+                let step = max(1, model.repos.count / max(1, count))
+                let picked = stride(from: 0, to: model.repos.count, by: step).prefix(count).map { model.repos[$0] }
+                for repo in picked {
+                    Trace.begin("select \(repo.name)")
+                    model.selection = repo.id
                     model.section = .repositories
                     DispatchQueue.main.async { Trace.note("main thread free again") }
+                    try? await Task.sleep(for: .seconds(4))
+                }
+                for repo in picked.prefix(4) {
+                    Trace.begin("select again \(repo.name)")
+                    model.selection = repo.id
+                    DispatchQueue.main.async { Trace.note("main thread free again") }
                     try? await Task.sleep(for: .seconds(3))
-                    Trace.begin("cycle done")
                 }
-            }
-            #if DEBUG
-            // Development switches (see AppModel.development()).
-            if env["GNV_DEV_SECTION"] == "home" { model.section = .home }
-            if env["GNV_DEV_SECTION"] == "inbox" { model.section = .inbox }
-            if env["GNV_DEV_SECTION"] == "search" {
-                model.searchText = env["GNV_DEV_QUERY"] ?? ""
-                model.section = .search
-            }
-            if model.initialOpen == "palette" {
-                try? await Task.sleep(for: .seconds(4))
-                model.paletteOpen = true
-            }
-            if model.initialOpen == "releases" {
+                Trace.begin("home")
+                model.section = .home
+                DispatchQueue.main.async { Trace.note("main thread free again") }
                 try? await Task.sleep(for: .seconds(3))
-                model.sheet = .releases
+                Trace.begin("back to a repository")
+                model.section = .repositories
+                DispatchQueue.main.async { Trace.note("main thread free again") }
+                try? await Task.sleep(for: .seconds(3))
+                Trace.begin("cycle done")
             }
-            if model.initialOpen == "merge" {
-                try? await Task.sleep(for: .seconds(4))
-                if let repo = model.selectedRepo, let pull = model.forgeState(repo).pulls.first(where: { $0.state == "open" }) {
-                    model.sheet = .merge(repo, pull)
-                }
-            }
-            if model.initialOpen == "file" {
-                try? await Task.sleep(for: .seconds(4))
-                if let repo = model.selectedRepo, let items = await model.resources(of: repo),
-                   let item = items.first(where: { $0.file.hasPrefix("zz_") && $0.kind == "resource" }) ?? items.first(where: { $0.kind == "resource" }) ?? items.first {
-                    model.fileTarget = FileTarget(repo: repo, file: item.file, line: item.line)
-                }
-            }
-            if let key = ProcessInfo.processInfo.environment["GNV_DEV_TICKET"] {
-                try? await Task.sleep(for: .seconds(4))
-                model.ticketTarget = key
-            }
-            if model.initialOpen == "settings" {
-                try? await Task.sleep(for: .seconds(2))
-                openSettings()
-            }
-            if model.initialOpen == "pullall" {
-                try? await Task.sleep(for: .seconds(4))
-                model.sheet = .pullAll
-            }
-            #endif
         }
-        .overlay { LogModalLayer() }
-        .overlay { DiffModalLayer() }
-        .overlay { TourLayer() }
-        .overlay { TicketModalLayer() }
-        .overlay { DropdownLayer() }
-        .overlay { ConfirmLayer() }
-        .overlay(alignment: .bottom) { ToastLayer() }
-        .coordinateSpace(name: dropdownSpace)
-        .environment(dropdowns)
-        .background(Theme.window)
-        .foregroundStyle(Theme.text)
-        .font(.system(size: 13))
-        .ignoresSafeArea()
+        #if DEBUG
+        // Development switches (see AppModel.development()).
+        if env["GNV_DEV_SECTION"] == "home" { model.section = .home }
+        if env["GNV_DEV_SECTION"] == "inbox" { model.section = .inbox }
+        if env["GNV_DEV_SECTION"] == "search" {
+            model.searchText = env["GNV_DEV_QUERY"] ?? ""
+            model.section = .search
+        }
+        if model.initialOpen == "palette" {
+            try? await Task.sleep(for: .seconds(4))
+            model.paletteOpen = true
+        }
+        if model.initialOpen == "releases" {
+            try? await Task.sleep(for: .seconds(3))
+            model.sheet = .releases
+        }
+        if model.initialOpen == "merge" {
+            try? await Task.sleep(for: .seconds(4))
+            if let repo = model.selectedRepo, let pull = model.forgeState(repo).pulls.first(where: { $0.state == "open" }) {
+                model.sheet = .merge(repo, pull)
+            }
+        }
+        if model.initialOpen == "file" {
+            try? await Task.sleep(for: .seconds(4))
+            if let repo = model.selectedRepo, let items = await model.resources(of: repo),
+               let item = items.first(where: { $0.file.hasPrefix("zz_") && $0.kind == "resource" }) ?? items.first(where: { $0.kind == "resource" }) ?? items.first {
+                model.fileTarget = FileTarget(repo: repo, file: item.file, line: item.line)
+            }
+        }
+        if let key = ProcessInfo.processInfo.environment["GNV_DEV_TICKET"] {
+            try? await Task.sleep(for: .seconds(4))
+            model.ticketTarget = key
+        }
+        if model.initialOpen == "settings" {
+            try? await Task.sleep(for: .seconds(2))
+            openSettings()
+        }
+        if model.initialOpen == "pullall" {
+            try? await Task.sleep(for: .seconds(4))
+            model.sheet = .pullAll
+        }
+        #endif
     }
 
     @ViewBuilder private var content: some View {
@@ -144,6 +137,38 @@ struct RootView: View {
                 EmptyState("No repositories", symbol: "shippingbox", message: "\(model.workspace?.title ?? "This workspace") has no repositories you can see.")
             }
         }
+    }
+}
+
+/// Everything that opens over the window: forms, the palette, logs, diffs,
+/// tickets, the tour, menus, questions, messages.
+private struct WindowLayers: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .modifier(FormLayers())
+            .overlay { LogModalLayer() }
+            .overlay { DiffModalLayer() }
+            .overlay { TourLayer() }
+            .overlay { TicketModalLayer() }
+            .overlay { DropdownLayer() }
+            .overlay { ConfirmLayer() }
+            .overlay(alignment: .bottom) { ToastLayer() }
+    }
+}
+
+private struct FormLayers: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .overlay { SheetLayer() }
+            .overlay { CommandPalette() }
+            #if DEBUG
+            .overlay(alignment: .topTrailing) {
+                // Development: the menu bar panel drawn in the window, to look at it.
+                if ProcessInfo.processInfo.environment["GNV_DEV_OPEN"] == "menubar" {
+                    MenuBarView().clipShape(RoundedRectangle(cornerRadius: 10)).shadow(radius: 20).padding(40)
+                }
+            }
+            #endif
     }
 }
 

@@ -100,6 +100,8 @@ extension AppModel {
 
     /// Asks each server once what its token may do, for the buttons that write.
     func learnWriteAccess() async {
+        // Measuring on a server that must be left alone: not even a probe goes out.
+        if ProcessInfo.processInfo.environment["GNV_DEV_NOFETCH"] != nil { return }
         for account in accounts where writeAccess[account.host] == nil {
             let checks = await permissions(host: account.host)
             let writes = checks.filter { $0.writes && $0.id != "write-notes" }
