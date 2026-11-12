@@ -1,0 +1,8 @@
+.DS_Store
+build/
+build.noindex/
+DerivedData/
+GitNestView.xcodeproj/
+xcuserdata/
+*.xcuserstate
+.context/

@@ -1,0 +1,44 @@
+[
+ {
+  "id": 5,
+  "name": "Lab-GCP",
+  "full_name": "Lab GCP",
+  "email": "",
+  "avatar_url": "https://forge.example.test/avatars/f260a3440976f7e16eae97dd8f6ae060",
+  "description": "GitNest View test lab, safe to delete",
+  "website": "",
+  "location": "",
+  "visibility": "public",
+  "repo_admin_change_team_access": false,
+  "created": "2026-11-10T22:27:56Z",
+  "username": "Lab-GCP"
+ },
+ {
+  "id": 7,
+  "name": "Lab-Many",
+  "full_name": "",
+  "email": "",
+  "avatar_url": "https://forge.example.test/avatars/c082ece78c5308462f83e495df8ec291",
+  "description": "",
+  "website": "",
+  "location": "",
+  "visibility": "private",
+  "repo_admin_change_team_access": false,
+  "created": "2026-11-11T15:41:05Z",
+  "username": "Lab-Many"
+ },
+ {
+  "id": 6,
+  "name": "Lab-Scale",
+  "full_name": "",
+  "email": "",
+  "avatar_url": "https://forge.example.test/avatars/bb6f180486ad327717376a4bcbf6a202",
+  "description": "Many repositories, to see how GitNest View copes",
+  "website": "",
+  "location": "",
+  "visibility": "public",
+  "repo_admin_change_team_access": false,
+  "created": "2026-11-10T22:51:53Z",
+  "username": "Lab-Scale"
+ }
+]

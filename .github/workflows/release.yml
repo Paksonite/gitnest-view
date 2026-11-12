@@ -1,0 +1,74 @@
+name: Release
+
+# Push a tag like v1.2.3 to publish. Tags with a hyphen (v1.2.3-beta.1)
+# become pre-releases: Sparkle and Homebrew only follow full releases.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Test
+        run: scripts/test.sh
+
+      - name: Build
+        run: VERSION="${GITHUB_REF_NAME#v}" scripts/build.sh
+
+      - name: Sign
+        env:
+          SIGNING_P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+        run: |
+          if [[ -z "$SIGNING_P12_BASE64" ]]; then
+            echo "::error::SIGNING_P12_BASE64 is not set; refusing to publish an ad-hoc signed release"
+            exit 1
+          fi
+          scripts/sign.sh
+
+      - name: Package
+        id: package
+        run: echo "dmg=$(scripts/package.sh)" >>"$GITHUB_OUTPUT"
+
+      - name: Appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: scripts/appcast.sh "${{ steps.package.outputs.dmg }}"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DMG: ${{ steps.package.outputs.dmg }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$DMG" build.noindex/appcast.xml --clobber
+            exit 0
+          fi
+          prerelease=()
+          [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "$DMG" build.noindex/appcast.xml \
+            --title "GitNest View ${GITHUB_REF_NAME#v}" \
+            --generate-notes \
+            --verify-tag \
+            "${prerelease[@]}"
+
+      - name: Update Homebrew cask
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: scripts/update-cask.sh "${{ steps.package.outputs.dmg }}"

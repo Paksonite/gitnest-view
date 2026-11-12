@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: core/go.mod
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Go checks
+        working-directory: core
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+
+      # The engine's tests, then the app's (the live Forgejo tests skip
+      # without TEST_RUNNER_GNV_* variables).
+      - name: Test
+        run: scripts/test.sh
+
+      - name: Build
+        run: scripts/build.sh
+
+      # Pushes and same-repository PRs get the secrets and exercise the
+      # release signing path; forks don't, and sign.sh signs ad hoc.
+      - name: Sign and package
+        env:
+          SIGNING_P12_BASE64: ${{ secrets.SIGNING_P12_BASE64 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+        run: |
+          scripts/sign.sh
+          scripts/package.sh
