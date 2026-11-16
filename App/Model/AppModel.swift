@@ -381,6 +381,14 @@ final class AppModel {
                 try? await Task.sleep(for: .seconds(120))
             }
         })
+        // Jira on its own beat: tickets move faster than the two-minute news check.
+        loops.append(Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard let self, NSApp.isActive, self.jiraSettings != nil else { continue }
+                await self.refreshJira()
+            }
+        })
         // A quiet fetch of every clone keeps "behind" true without asking.
         loops.append(Task { [weak self] in
             try? await Task.sleep(for: .seconds(60))

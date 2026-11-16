@@ -380,6 +380,8 @@ extension AppModel {
         lastActivation = .now
         activations += 1
         Task { await refreshLocal() }
+        // Back from the browser, where a ticket may just have moved.
+        if jiraSettings != nil { Task { await refreshJira() } }
     }
 }
 

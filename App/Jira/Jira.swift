@@ -86,6 +86,7 @@ struct JiraClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Basic " + Data("\(email):\(token)".utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request, delegate: AuthGuard.shared)
+        Trace.note("JIRA GET \(path)")
         guard let http = response as? HTTPURLResponse else { throw JiraError.notAnswer }
         switch http.statusCode {
         case 200..<300: break
@@ -158,6 +159,8 @@ struct JiraState: Equatable, Sendable {
     var issues: [JiraIssue] = []
     var error: String?
     var loaded = false
+    /// When Jira last answered.
+    var read: Date?
 }
 
 /// Where Jira is and who asks; the token is kept with the other tokens.
@@ -229,6 +232,7 @@ extension AppModel {
             state.error = error.localizedDescription
         }
         state.loaded = true
+        if state.error == nil { state.read = .now }
         if jira != state { jira = state }
     }
 
