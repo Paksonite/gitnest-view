@@ -90,6 +90,25 @@ final class LiveJiraTests: XCTestCase {
         XCTAssertEqual(after.comments.count, before.comments.count, "the test's comment was removed again")
     }
 
+    /// Hands the ticket to nobody and back: the assignee picker's two calls.
+    func testAssignablePeopleAndReassign() async throws {
+        guard let key = ProcessInfo.processInfo.environment["GNV_JIRA_ISSUE"] else { throw XCTSkip("GNV_JIRA_ISSUE is not set") }
+        let model = try await connected()
+        let before = try await model.ticket(key)
+        let me = try XCTUnwrap(model.jiraAccountID, "reading a ticket learns who the user is")
+        let people = await model.jiraAssignable(key, query: "")
+        XCTAssertFalse(people.isEmpty, "someone can take the ticket")
+        XCTAssertTrue(people.allSatisfy { !$0.displayName.isEmpty })
+        let unassign = await model.jira("Unassigned") { try await $0.assign(key, to: nil) }
+        XCTAssertNil(unassign)
+        let nobody = try await model.ticket(key)
+        XCTAssertNil(nobody.assignee)
+        let back = await model.jira("Back") { try await $0.assign(key, to: before.assigneeID ?? me) }
+        XCTAssertNil(back)
+        let after = try await model.ticket(key)
+        XCTAssertEqual(after.assigneeID, before.assigneeID ?? me)
+    }
+
     func testMovesATicketAndBack() async throws {
         guard let key = ProcessInfo.processInfo.environment["GNV_JIRA_ISSUE"] else { throw XCTSkip("GNV_JIRA_ISSUE is not set") }
         let model = try await connected()
