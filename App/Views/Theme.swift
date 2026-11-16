@@ -614,3 +614,41 @@ struct ResizableColumn<Content: View>: View {
         }
     }
 }
+
+/// How Jira statuses look in the app: to do grey, in progress blue,
+/// waiting yellow, blocked red, done green, cancelled dimmed.
+enum JiraLook {
+    static func status(_ name: String, category: String?) -> Color {
+        let name = name.lowercased()
+        func has(_ words: [String]) -> Bool { words.contains { name.contains($0) } }
+        if has(["cancel", "anulow", "odrzuc", "reject", "won't", "duplicate", "duplikat"]) { return Theme.tertiary }
+        if category == "done" { return Theme.green }
+        if has(["block", "zablok", "impediment"]) { return Theme.red }
+        if has(["escalat", "eskal"]) { return Theme.orange }
+        if has(["wait", "await", "pending", "oczek", "hold", "wstrzym", "approval", "akcept", "review", "przegl"]) { return Theme.yellow }
+        if category == "indeterminate" { return Theme.blue }
+        return Theme.secondary
+    }
+}
+
+/// A round mark with a person's initials, coloured by who they are.
+struct PersonMark: View {
+    let name: String
+    var id: String?
+    var size: CGFloat = 22
+
+    private static let colors: [Color] = [Theme.blue, Theme.purple, Theme.green, Theme.orange, Theme.yellow, Theme.red]
+
+    var body: some View {
+        let initials = name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
+        let seed = (id ?? name).unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF }
+        let color = Self.colors[seed % Self.colors.count]
+        Text(initials.isEmpty ? "?" : initials)
+            .font(.system(size: size * 0.42, weight: .semibold))
+            .foregroundStyle(color)
+            .frame(width: size, height: size)
+            .background(color.opacity(0.18), in: Circle())
+            .overlay(Circle().strokeBorder(color.opacity(0.35)))
+            .accessibilityHidden(true)
+    }
+}

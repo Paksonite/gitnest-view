@@ -451,7 +451,7 @@ private struct JiraStatusButton: View {
 
     var body: some View {
         Button { open = true } label: {
-            Badge(text: issue.fields.status.name, color: issue.inProgress ? Theme.blue : issue.done ? Theme.green : Theme.secondary, filled: false)
+            Badge(text: issue.fields.status.name, color: JiraLook.status(issue.fields.status.name, category: issue.fields.status.statusCategory?.key), filled: false)
         }
         .buttonStyle(.plain)
         .help("Move \(issue.key) to another status")

@@ -209,6 +209,14 @@ extension JiraClient {
         _ = try await call("PUT", "rest/api/3/issue/\(key)/assignee", json: ["accountId": accountID as Any? ?? NSNull()])
     }
 
+    /// Who the ticket can be assigned to.
+    func assignable(_ key: String, query: String) async throws -> [JiraUser] {
+        let all: [JiraUser] = try await get("rest/api/3/user/assignable/search", query: [
+            .init(name: "issueKey", value: key), .init(name: "query", value: query), .init(name: "maxResults", value: "20"),
+        ])
+        return all.filter { $0.active != false && $0.accountType != "app" }
+    }
+
     func priorities() async throws -> [String] {
         struct Priority: Decodable { var name: String }
         let all: [Priority] = try await get("rest/api/3/priority")
@@ -217,6 +225,29 @@ extension JiraClient {
 
     func remove(comment id: String, of key: String) async throws { _ = try await call("DELETE", "rest/api/3/issue/\(key)/comment/\(id)") }
     func remove(worklog id: String, of key: String) async throws { _ = try await call("DELETE", "rest/api/3/issue/\(key)/worklog/\(id)") }
+}
+
+/// Someone in Jira.
+struct JiraUser: Decodable, Identifiable, Hashable, Sendable {
+    var accountId: String
+    var displayName: String
+    var emailAddress: String?
+    var active: Bool?
+    var accountType: String?
+    var id: String { accountId }
+}
+
+/// Jira's way of writing time: "1h 30m", "45m", "2d", "1.5h", "1w 2d".
+enum JiraTime {
+    static func valid(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty && trimmed.range(of: #"^(\d+([.,]\d+)?\s*[wdhm]\s*)+$"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    /// What Jira accepts: lower case, a dot for decimals.
+    static func normalized(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: ",", with: ".")
+    }
 }
 
 /// What changed among the user's tickets between two looks, worth telling.

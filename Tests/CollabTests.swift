@@ -73,6 +73,19 @@ final class CollabTests: XCTestCase {
         XCTAssertTrue(posted.isEmpty)
     }
 
+    func testJiraTimeAndStatusColours() {
+        for good in ["1h 30m", "45m", "2d", "1.5h", "1,5h", "1w 2d", " 15m ", "1H"] { XCTAssertTrue(JiraTime.valid(good), good) }
+        for bad in ["", "abc", "90", "1 hour", "h", "1h x"] { XCTAssertFalse(JiraTime.valid(bad), bad) }
+        XCTAssertEqual(JiraTime.normalized(" 1,5H "), "1.5h")
+        XCTAssertEqual(JiraLook.status("To Do", category: "new"), Theme.secondary)
+        XCTAssertEqual(JiraLook.status("W toku", category: "indeterminate"), Theme.blue)
+        XCTAssertEqual(JiraLook.status("Oczekiwanie na klienta", category: "indeterminate"), Theme.yellow)
+        XCTAssertEqual(JiraLook.status("Waiting for approval", category: "new"), Theme.yellow)
+        XCTAssertEqual(JiraLook.status("Rozwiązane", category: "done"), Theme.green)
+        XCTAssertEqual(JiraLook.status("Anulowano", category: "done"), Theme.tertiary)
+        XCTAssertEqual(JiraLook.status("Blocked", category: "indeterminate"), Theme.red)
+    }
+
     func testJiraTextBothWays() {
         XCTAssertEqual(JiraTicket.plain("<p>one<br/>two</p><ul><li>a &amp; b</li><li>c</li></ul><p>&lt;tag&gt;</p>"), "one\ntwo\n\n• a & b\n• c\n<tag>")
         XCTAssertEqual(JiraTicket.plain(nil), "")

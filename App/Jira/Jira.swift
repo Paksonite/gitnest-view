@@ -123,7 +123,11 @@ struct JiraClient: Sendable {
 
 /// A status a ticket can move to from where it is.
 struct JiraTransition: Decodable, Identifiable, Hashable, Sendable {
-    struct Target: Decodable, Hashable, Sendable { var name: String }
+    struct Target: Decodable, Hashable, Sendable {
+        struct Category: Decodable, Hashable, Sendable { var key: String? }
+        var name: String
+        var statusCategory: Category?
+    }
     var id: String
     var name: String
     var to: Target?
@@ -285,12 +289,41 @@ extension AppModel {
 
     func ticket(_ key: String) async throws -> JiraTicket {
         guard let client = jiraNow else { throw JiraClient.JiraError.notFound }
+        // Who "me" is: for "Assign to me" and the user's own comments.
+        if jiraAccountID == nil { jiraAccountID = try? await client.myAccountID() }
         return try await client.ticket(key)
     }
 
     func ticketTransitions(_ key: String) async -> [JiraTransition] {
         guard let client = jiraNow else { return [] }
         return (try? await client.transitions(key)) ?? []
+    }
+
+    /// People the ticket may be handed to; `query` matches names and e-mails.
+    func jiraAssignable(_ key: String, query: String) async -> [JiraUser] {
+        guard let client = jiraNow else { return [] }
+        return (try? await client.assignable(key, query: query)) ?? []
+    }
+
+    /// Reads Jira again after a change: at once, and once more a few
+    /// seconds later, when its search has caught up with the change.
+    func settleJira() {
+        Task {
+            await refreshJira()
+            try? await Task.sleep(for: .seconds(4))
+            await refreshJira()
+        }
+    }
+
+    /// The dashboard shows what the ticket window just read, before Jira's
+    /// search catches up.
+    func jiraTicketRead(_ ticket: JiraTicket) {
+        guard let index = jira.issues.firstIndex(where: { $0.key == ticket.key }) else { return }
+        var issue = jira.issues[index]
+        issue.fields.summary = ticket.summary
+        issue.fields.status = .init(name: ticket.status, statusCategory: .init(key: ticket.statusCategory))
+        if let priority = ticket.priority { issue.fields.priority = .init(name: priority) }
+        if issue != jira.issues[index] { jira.issues[index] = issue }
     }
 
     func jiraPriorities() async -> [String] {
@@ -305,7 +338,7 @@ extension AppModel {
         do {
             try await work(client)
             toast(what)
-            Task { await self.refreshJira() }
+            settleJira()
             return nil
         } catch {
             return error.localizedDescription
