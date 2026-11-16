@@ -365,6 +365,7 @@ struct JiraCard: View {
             HStack(spacing: 8) {
                 if let site = model.jiraSettings?.site { Text(site).font(.system(size: 11)).foregroundStyle(Theme.tertiary).lineLimit(1) }
                 if state.loaded { Text("\(state.issues.count)").font(.system(size: 12)).foregroundStyle(Theme.secondary) }
+                JiraRefreshButton(read: state.read)
             }
         } content: {
             if !state.loaded { ProgressView().controlSize(.small) }
@@ -482,5 +483,33 @@ private struct JiraStatusButton: View {
             .background(Theme.window)
             .task { moves = await model.transitions(for: issue) }
         }
+    }
+}
+
+/// Reads the tickets again now; says when they were read.
+private struct JiraRefreshButton: View {
+    @Environment(AppModel.self) private var model
+    let read: Date?
+    @State private var working = false
+
+    var body: some View {
+        Button {
+            working = true
+            Task {
+                await model.refreshJira()
+                working = false
+            }
+        } label: {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 10.5, weight: .semibold))
+                .rotationEffect(.degrees(working ? 360 : 0))
+                .animation(working ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: working)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Theme.secondary)
+        .disabled(working)
+        .help(read.map { "Read from Jira \($0.relative); read every 30 seconds while GitNest View is in front. Click to read now." }
+              ?? "Read the tickets from Jira now")
+        .accessibilityLabel("Refresh Jira")
     }
 }
