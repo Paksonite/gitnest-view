@@ -872,15 +872,18 @@ private struct StashSection: View {
     }
 }
 
-/// Every readable file of the clone, its uncommitted ones marked; a click
-/// opens the file beside the list.
-private struct RepoFiles: View {
+/// The clone as its folders and files, uncommitted ones marked (and the
+/// folders that hold them); a click on a file opens it beside the tree.
+struct RepoFiles: View {
     @Environment(AppModel.self) private var model
     let repo: ForgeRepo
     let clone: Repo
     let changed: [ChangedFile]
-    @State private var all: [String]?
+    @State private var tree: FileTree?
+    @State private var expanded: Set<String> = []
     @State private var query = ""
+    /// Folders already opened for the changes, so closing one by hand sticks.
+    @State private var opened: Set<String> = []
 
     var body: some View {
         let marks = Dictionary(changed.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
@@ -888,54 +891,100 @@ private struct RepoFiles: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary)
                 TextField("Filter files", text: $query).textFieldStyle(.plain)
+                if !expanded.isEmpty, query.isEmpty {
+                    Button("Collapse All", systemImage: "arrow.down.right.and.arrow.up.left") { expanded = [] }
+                        .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(Theme.tertiary).help("Collapse every folder")
+                }
             }
             .font(.system(size: 12))
             .padding(.horizontal, 8).frame(height: 26)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
             .padding(8)
-            if let all {
-                let shown = query.isEmpty ? all : all.filter { $0.localizedCaseInsensitiveContains(query) }
+            if let tree {
+                let rows = tree.rows(expanded: expanded, query: query)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(shown, id: \.self) { path in
-                            row(path, mark: marks[path])
+                        ForEach(rows) { row in
+                            if row.folder {
+                                folderRow(row)
+                            } else {
+                                fileRow(row, mark: marks[row.path])
+                            }
                         }
-                        if shown.isEmpty {
-                            Text(all.isEmpty ? "No text files to show." : "Nothing matches.").font(.system(size: 12)).foregroundStyle(Theme.secondary).padding(12)
+                        if rows.isEmpty {
+                            Text(tree.root.children.isEmpty ? "The clone has no files." : "Nothing matches.")
+                                .font(.system(size: 12)).foregroundStyle(Theme.secondary).padding(12)
                         }
-                        if all.count >= 5000 {
-                            Text("The first 5000 files; filter to find the rest.").font(.system(size: 11)).foregroundStyle(Theme.tertiary).padding(8)
+                        if tree.cut {
+                            Text("The first \(FileTree.limit) files are shown.").font(.system(size: 11)).foregroundStyle(Theme.tertiary).padding(8)
                         }
                     }
-                    .padding(.horizontal, 8).padding(.bottom, 6)
+                    .padding(.horizontal, 6).padding(.bottom, 6)
                 }
             } else {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: "\(clone.path)/\(clone.lastCommit)/\(clone.branch)/\(changed.count)") {
+        .task(id: "\(clone.path)/\(clone.lastCommit)/\(clone.branch)/\(changed.map(\.path).joined(separator: "|"))") {
             let root = clone.path
-            // New files first: they are what is being worked on.
-            let listed = await Task.detached(priority: .userInitiated) {
-                FileReader.list(root, limit: 5000).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-            }.value
-            let fresh = changed.filter { $0.untracked && !listed.contains($0.path) }.map(\.path)
-            all = fresh + listed
+            let changedPaths = changed.filter { !$0.code.contains("D") }.map(\.path)
+            let fresh = await Task.detached(priority: .userInitiated) { FileTree.read(root, changed: changedPaths) }.value
+            // Folders that came to hold changes open by themselves, once.
+            let new = fresh.foldersWithChanges.subtracting(opened)
+            expanded.formUnion(new)
+            opened.formUnion(new)
+            tree = fresh
+            reveal(model.fileTarget)
+        }
+        .onChange(of: model.fileTarget) { reveal(model.fileTarget) }
+    }
+
+    /// Opens the folders above a file shown from elsewhere (Search, Changes).
+    private func reveal(_ target: FileTarget?) {
+        guard let target, target.repo.id == repo.id else { return }
+        var prefix = ""
+        for part in target.file.split(separator: "/").dropLast() {
+            prefix = prefix.isEmpty ? String(part) : prefix + "/" + part
+            expanded.insert(prefix)
         }
     }
 
-    private func row(_ path: String, mark: ChangedFile?) -> some View {
-        let shown = model.fileTarget?.repo.id == repo.id && model.fileTarget?.file == path
-        let folder = (path as NSString).deletingLastPathComponent
+    private func folderRow(_ row: FileTree.Row) -> some View {
+        let open = !query.isEmpty || expanded.contains(row.path)
         return Button {
-            model.fileTarget = shown ? nil : FileTarget(repo: repo, file: path, line: nil)
+            guard query.isEmpty else { return }
+            if open { expanded.remove(row.path) } else { expanded.insert(row.path) }
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "chevron.right").font(.system(size: 8.5, weight: .semibold)).foregroundStyle(Theme.tertiary)
+                    .rotationEffect(.degrees(open ? 90 : 0)).frame(width: 10)
+                Image(systemName: open ? "folder.fill" : "folder").font(.system(size: 11)).foregroundStyle(Theme.blue.opacity(0.8))
+                Text(row.name).font(.system(size: 12)).lineLimit(1)
+                Spacer(minLength: 4)
+                if row.changes > 0 {
+                    Text("\(row.changes)").font(.system(size: 10, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.orange)
+                        .help("\(row.changes) changed \(row.changes == 1 ? "file" : "files") inside")
+                }
+            }
+            .padding(.leading, CGFloat(row.depth) * 14 + 4).padding(.trailing, 6).frame(height: 23)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverBackground(radius: 5)
+        .help(row.path)
+    }
+
+    private func fileRow(_ row: FileTree.Row, mark: ChangedFile?) -> some View {
+        let shown = model.fileTarget?.repo.id == repo.id && model.fileTarget?.file == row.path
+        return Button {
+            model.fileTarget = shown ? nil : FileTarget(repo: repo, file: row.path, line: nil)
+        } label: {
+            HStack(spacing: 5) {
+                Color.clear.frame(width: 10)
                 Image(systemName: "doc.text").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
-                (Text((path as NSString).lastPathComponent).foregroundStyle(mark == nil ? Theme.text : Theme.orange)
-                    + Text(folder.isEmpty ? "" : "  " + folder).foregroundStyle(Theme.tertiary))
-                    .font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                Text(row.name).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                    .foregroundStyle(mark == nil ? Theme.text : (mark?.untracked == true ? Theme.green : Theme.orange))
                 Spacer(minLength: 4)
                 if let mark {
                     Text(mark.untracked ? "A" : mark.code.trimmingCharacters(in: .whitespaces).prefix(1).uppercased())
@@ -943,11 +992,114 @@ private struct RepoFiles: View {
                         .help(mark.untracked ? "New, not committed" : "Changed since the last commit")
                 }
             }
-            .padding(.horizontal, 6).frame(height: 24)
+            .padding(.leading, CGFloat(row.depth) * 14 + 4).padding(.trailing, 6).frame(height: 23)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .hoverBackground(selected: shown, radius: 5)
-        .help(path)
+        .help(row.path)
+    }
+}
+
+/// A clone's folders and files, read from the disk.
+struct FileTree: Sendable {
+    static let limit = 20_000
+    private static let skipped: Set<String> = [".git", ".terraform", ".terragrunt-cache", "node_modules", ".DS_Store"]
+
+    final class Node: @unchecked Sendable {
+        let name: String
+        let path: String
+        let folder: Bool
+        var children: [Node] = []
+        /// Changed files at or below this node.
+        var changes = 0
+        init(name: String, path: String, folder: Bool) {
+            self.name = name
+            self.path = path
+            self.folder = folder
+        }
+    }
+
+    struct Row: Identifiable, Hashable {
+        var path: String
+        var name: String
+        var folder: Bool
+        var depth: Int
+        var changes: Int
+        var id: String { path }
+    }
+
+    let root: Node
+    let cut: Bool
+    let foldersWithChanges: Set<String>
+
+    /// Walks the clone (skipping .git and caches); changed paths that are
+    /// not on the disk yet are not invented.
+    static func read(_ base: String, changed: [String]) -> FileTree {
+        let root = Node(name: "", path: "", folder: true)
+        var folders: [String: Node] = ["": root]
+        var count = 0
+        var cut = false
+        let fm = FileManager.default
+        func walk(_ dir: String, into node: Node) {
+            guard let names = try? fm.contentsOfDirectory(atPath: base + (dir.isEmpty ? "" : "/" + dir)) else { return }
+            for name in names.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) where !skipped.contains(name) {
+                if count >= limit { cut = true; return }
+                let path = dir.isEmpty ? name : dir + "/" + name
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: base + "/" + path, isDirectory: &isDir) else { continue }
+                let child = Node(name: name, path: path, folder: isDir.boolValue)
+                node.children.append(child)
+                if isDir.boolValue {
+                    folders[path] = child
+                    walk(path, into: child)
+                } else {
+                    count += 1
+                }
+            }
+            // Folders first, as Finder and editors list them.
+            node.children.sort { $0.folder != $1.folder ? $0.folder : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }
+        walk("", into: root)
+        var withChanges: Set<String> = []
+        for path in changed {
+            var parts = path.split(separator: "/").map(String.init)
+            parts.removeLast()
+            var prefix = ""
+            root.changes += 1
+            for part in parts {
+                prefix = prefix.isEmpty ? part : prefix + "/" + part
+                folders[prefix]?.changes += 1
+                withChanges.insert(prefix)
+            }
+        }
+        return FileTree(root: root, cut: cut, foldersWithChanges: withChanges)
+    }
+
+    /// The rows to draw: open folders show their children; a query shows
+    /// the matching files with the folders above them.
+    func rows(expanded: Set<String>, query: String) -> [Row] {
+        let needle = query.trimmingCharacters(in: .whitespaces)
+        // One walk: a folder shows when it is open, or (filtering) when
+        // something below it matches.
+        func add(_ node: Node, depth: Int) -> [Row] {
+            var rows: [Row] = []
+            for child in node.children {
+                let row = Row(path: child.path, name: child.name, folder: child.folder, depth: depth, changes: child.changes)
+                if child.folder {
+                    if needle.isEmpty {
+                        rows.append(row)
+                        if expanded.contains(child.path) { rows += add(child, depth: depth + 1) }
+                    } else {
+                        let below = add(child, depth: depth + 1)
+                        if !below.isEmpty { rows.append(row); rows += below }
+                    }
+                } else if needle.isEmpty || child.path.localizedCaseInsensitiveContains(needle) {
+                    rows.append(row)
+                }
+            }
+            return rows
+        }
+        return add(root, depth: 0)
     }
 }

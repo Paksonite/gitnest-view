@@ -267,3 +267,25 @@ final class CollabTests: XCTestCase {
         XCTAssertTrue(model.jira.issues.isEmpty)
     }
 }
+
+final class FileTreeTests: XCTestCase {
+    func testFoldersFirstChangesCountedAndFilter() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "gnv-tree-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for path in ["b.txt", "roles/web/tasks/main.yml", "roles/web/files/x.conf", "roles/db/tasks/main.yml", ".git/HEAD", "a/z.md"] {
+            let url = root.appending(path: path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: url)
+        }
+        let tree = FileTree.read(root.path, changed: ["roles/web/tasks/main.yml", "b.txt"])
+        // Closed: the top level only, folders first, .git left out.
+        XCTAssertEqual(tree.rows(expanded: [], query: "").map(\.path), ["a", "roles", "b.txt"])
+        XCTAssertEqual(tree.foldersWithChanges, ["roles", "roles/web", "roles/web/tasks"])
+        let open = tree.rows(expanded: tree.foldersWithChanges, query: "")
+        XCTAssertEqual(open.map(\.path), ["a", "roles", "roles/db", "roles/web", "roles/web/files", "roles/web/tasks", "roles/web/tasks/main.yml", "b.txt"])
+        XCTAssertEqual(open.first { $0.path == "roles" }?.changes, 1)
+        XCTAssertEqual(open.first { $0.path == "roles/web/tasks/main.yml" }?.depth, 3)
+        // A query shows matching files with their folders, whatever is open.
+        XCTAssertEqual(tree.rows(expanded: [], query: "conf").map(\.path), ["roles", "roles/web", "roles/web/files", "roles/web/files/x.conf"])
+    }
+}
