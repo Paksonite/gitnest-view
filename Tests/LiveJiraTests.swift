@@ -109,6 +109,66 @@ final class LiveJiraTests: XCTestCase {
         XCTAssertEqual(after.assigneeID, before.assigneeID ?? me)
     }
 
+    /// A raw call for what the app itself never does (making a link).
+    private func raw(_ method: String, _ path: String, body: Any? = nil) async throws -> Any? {
+        let env = ProcessInfo.processInfo.environment
+        let site = try XCTUnwrap(JiraClient.siteURL(env["GNV_JIRA_SITE"] ?? ""))
+        let parts = path.split(separator: "?", maxSplits: 1).map(String.init)
+        var components = try XCTUnwrap(URLComponents(url: site.appending(path: parts[0]), resolvingAgainstBaseURL: false))
+        if parts.count > 1 { components.query = parts[1] }
+        var request = URLRequest(url: try XCTUnwrap(components.url))
+        request.httpMethod = method
+        request.setValue("Basic " + Data("\(env["GNV_JIRA_EMAIL"] ?? ""):\(env["GNV_JIRA_TOKEN"] ?? "")".utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        XCTAssertTrue((200..<300).contains(code), "\(method) \(path): HTTP \(code) \(String(decoding: data, as: UTF8.self))")
+        return data.isEmpty ? nil : try? JSONSerialization.jsonObject(with: data)
+    }
+
+    func testBlockerLinkWatchersAndAvatars() async throws {
+        guard let key = ProcessInfo.processInfo.environment["GNV_JIRA_ISSUE"] else { throw XCTSkip("GNV_JIRA_ISSUE is not set") }
+        let model = try await connected()
+        let project = String(key.split(separator: "-").first ?? "")
+        await model.setJiraFilter("project = \(project) AND key != \(key) ORDER BY created ASC")
+        let other = try XCTUnwrap(model.jira.issues.first?.key, "the project needs a second ticket")
+
+        // The other ticket blocks this one (Jira: the inward ticket is the
+        // one the outward words apply to); the link goes away at the end.
+        _ = try await raw("POST", "rest/api/3/issueLink", body: ["type": ["name": "Blocks"], "inwardIssue": ["key": other], "outwardIssue": ["key": key]])
+        let ticket = try await model.ticket(key)
+        let link = try XCTUnwrap(ticket.links.first { $0.key == other }, "the link is read back: \(ticket.links)")
+        XCTAssertEqual(link.relation, "is blocked by")
+        XCTAssertFalse(link.summary.isEmpty)
+        let fields = try await raw("GET", "rest/api/3/issue/\(key)?fields=issuelinks") as? [String: Any]
+        for item in (fields?["fields"] as? [String: Any])?["issuelinks"] as? [[String: Any]] ?? []
+        where ((item["outwardIssue"] ?? item["inwardIssue"]) as? [String: Any])?["key"] as? String == other {
+            if let id = item["id"] as? String { _ = try await raw("DELETE", "rest/api/3/issueLink/\(id)") }
+        }
+        let unlinked = try await model.ticket(key)
+        XCTAssertFalse(unlinked.links.contains { $0.key == other })
+
+        // Watching: off and on again, ending where it started.
+        let me = try XCTUnwrap(model.jiraAccountID)
+        let wasWatching = ticket.watching
+        let first = await model.jira("toggle") { wasWatching ? try await $0.unwatch(key, accountID: me) : try await $0.watch(key, accountID: me) }
+        XCTAssertNil(first)
+        let toggled = try await model.ticket(key)
+        XCTAssertEqual(toggled.watching, !wasWatching)
+        XCTAssertEqual(toggled.watchers.contains { $0.accountID == me }, !wasWatching)
+        let second = await model.jira("back") { wasWatching ? try await $0.watch(key, accountID: me) : try await $0.unwatch(key, accountID: me) }
+        XCTAssertNil(second)
+        let restored = try await model.ticket(key)
+        XCTAssertEqual(restored.watching, wasWatching)
+        XCTAssertTrue(restored.watchers.allSatisfy { !$0.name.isEmpty })
+        // Jira's generated initials are no picture; only a chosen one becomes an avatar URL.
+        XCTAssertFalse(restored.watchers.contains { $0.avatar?.absoluteString.contains("/initials/") == true })
+    }
+
     func testMovesATicketAndBack() async throws {
         guard let key = ProcessInfo.processInfo.environment["GNV_JIRA_ISSUE"] else { throw XCTSkip("GNV_JIRA_ISSUE is not set") }
         let model = try await connected()

@@ -1042,6 +1042,21 @@ func Push(ctx context.Context, dir string, force, hasUpstream bool) error {
 	return err
 }
 
+// NewCommits counts the commits on HEAD that no branch of the default
+// remote has. Zero means publishing the branch would put nothing new on the
+// server: a branch made and pushed before anything was committed on it.
+func NewCommits(ctx context.Context, dir string) (int, error) {
+	remote, err := defaultRemote(ctx, dir)
+	if err != nil {
+		return 0, err
+	}
+	out, err := run(ctx, kRead, dir, nil, "rev-list", "--count", "HEAD", "--not", "--remotes="+remote)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(out))
+}
+
 // UpstreamSeenLocally reports whether every commit on the current branch's
 // upstream was at some point part of the local branch (per its reflog).
 // After rewriting commits that were already pushed this is true, and a

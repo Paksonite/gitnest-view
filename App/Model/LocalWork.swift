@@ -148,14 +148,34 @@ extension AppModel {
         return result?.message ?? ""
     }
 
+    /// Commits on the checked-out branch that no branch on the server has.
+    /// Nil when the engine cannot tell (no remote, an error).
+    func newCommits(in clone: Repo) async -> Int? {
+        struct Params: Encodable, Sendable { var path: String }
+        let result: CountResult? = try? await core.call("repo.newcommits", Params(path: clone.path))
+        return result?.count
+    }
+
+    /// Pushes the checked-out branch. Publishing a branch that has nothing
+    /// the server lacks asks first: it is almost always a branch created and
+    /// pushed before the work was committed.
     @discardableResult
-    func push(_ repo: ForgeRepo, force: Bool = false) async -> Bool {
+    func push(_ repo: ForgeRepo, force: Bool = false, allowEmpty: Bool = false) async -> Bool {
         struct Params: Encodable, Sendable {
             var path: String
             var force: Bool
             var auth: GitAuth?
         }
         let branch = clone(of: repo)?.branch ?? ""
+        if !force, !allowEmpty, let clone = clone(of: repo), !clone.hasUpstream, !clone.detached,
+           await newCommits(in: clone) == 0 {
+            confirm(title: "Publish empty branch \(branch)?",
+                    message: "\(branch) has no commits that are not already on the server, so the new branch would only repeat the one it came from. Commit your work first, or publish it anyway to reserve the name.",
+                    button: "Publish Anyway") { [weak self] in
+                Task { await self?.push(repo, allowEmpty: true) }
+            }
+            return false
+        }
         let ok = await change(repo, success: force ? "Force pushed \(branch)" : "Pushed \(branch)") { clone in
             try await core.run("repo.push", Params(path: clone.path, force: force, auth: gitAuth(repo, clone)))
         }
@@ -556,9 +576,14 @@ extension AppModel {
     }
 
     /// Pushes the branch in every clone that has something to push.
-    func pushAll(_ work: WorkInProgress) async {
+    func pushAll(_ work: WorkInProgress, allowEmpty: Bool = false) async {
         var pushed = 0
+        var empty: [String] = []
         for (repo, clone) in work.items where !clone.hasUpstream || clone.ahead > 0 {
+            if !allowEmpty, !clone.hasUpstream, await newCommits(in: clone) == 0 {
+                empty.append(repo.name)
+                continue
+            }
             struct Params: Encodable, Sendable {
                 var path: String
                 var force: Bool
@@ -569,7 +594,19 @@ extension AppModel {
             }
             if ok { pushed += 1 }
         }
-        toast(pushed == 0 ? "Nothing to push in \(work.branch)" : "Pushed \(work.branch) in \(pushed) \(pushed == 1 ? "repository" : "repositories")")
+        if pushed > 0 || empty.isEmpty {
+            toast(pushed == 0 ? "Nothing to push in \(work.branch)" : "Pushed \(work.branch) in \(pushed) \(pushed == 1 ? "repository" : "repositories")")
+        }
+        if !empty.isEmpty {
+            let names = ListFormatter.localizedString(byJoining: empty)
+            confirm(title: "Publish empty \(work.branch)?",
+                    message: "In \(names) the branch has no commits that are not already on the server. Publish it there anyway?",
+                    button: "Publish Anyway") { [weak self] in
+                guard let self else { return }
+                let rest = WorkInProgress(branch: work.branch, items: work.items.filter { empty.contains($0.0.name) && !$0.1.hasUpstream })
+                Task { await self.pushAll(rest, allowEmpty: true) }
+            }
+        }
     }
 }
 

@@ -86,6 +86,53 @@ final class CollabTests: XCTestCase {
         XCTAssertEqual(JiraLook.status("Blocked", category: "indeterminate"), Theme.red)
     }
 
+    func testTicketRelationsSprintAndAvatars() throws {
+        let json = #"""
+        {"key": "APP-7", "fields": {
+          "summary": "Pay by card", "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}},
+          "issuetype": {"name": "Story"}, "project": {"name": "App"}, "priority": {"name": "High"},
+          "assignee": {"accountId": "a1", "displayName": "Ann Lee",
+                       "avatarUrls": {"48x48": "https://secure.gravatar.com/avatar/abc?d=https%3A%2F%2Favatar-management.example%2Finitials%2FAL-1.png"}},
+          "reporter": {"accountId": "b2", "displayName": "Bo", "avatarUrls": {"48x48": "https://avatar-management.example/initials/BO-2.png"}},
+          "parent": {"key": "APP-1", "fields": {"summary": "Checkout", "status": {"name": "To Do", "statusCategory": {"key": "new"}}}},
+          "subtasks": [{"key": "APP-8", "fields": {"summary": "Form", "status": {"name": "Done", "statusCategory": {"key": "done"}}}}],
+          "issuelinks": [
+            {"type": {"inward": "is blocked by", "outward": "blocks"}, "inwardIssue": {"key": "API-3", "fields": {"summary": "Card API", "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}}, "priority": {"name": "Highest"}}}},
+            {"type": {"inward": "is blocked by", "outward": "blocks"}, "outwardIssue": {"key": "APP-9", "fields": {"summary": "Receipts", "status": {"name": "To Do", "statusCategory": {"key": "new"}}}}}
+          ],
+          "watches": {"watchCount": 3, "isWatching": true},
+          "customfield_10020": [
+            {"id": 1, "name": "Sprint 4", "state": "closed", "startDate": "2026-10-01T08:00:00.000Z", "endDate": "2026-10-14T08:00:00.000Z"},
+            {"id": 2, "name": "Sprint 5", "state": "active", "startDate": "2026-10-15T08:00:00.000Z", "endDate": "2026-10-28T08:00:00.000Z", "goal": "Payments live"}
+          ]
+        }}
+        """#
+        let ticket = try XCTUnwrap(JiraTicket(json: try JSONSerialization.jsonObject(with: Data(json.utf8)), sprintField: "customfield_10020"))
+        XCTAssertEqual(ticket.parentTicket?.key, "APP-1")
+        XCTAssertEqual(ticket.parentTicket?.summary, "Checkout")
+        XCTAssertEqual(ticket.subtasks.map(\.key), ["APP-8"])
+        XCTAssertEqual(ticket.links.map(\.relation), ["is blocked by", "blocks"])
+        XCTAssertEqual(ticket.links.first?.priority, "Highest")
+        XCTAssertEqual(ticket.watchCount, 3)
+        XCTAssertTrue(ticket.watching)
+        XCTAssertEqual(ticket.sprint?.name, "Sprint 5", "the running sprint wins over the closed one")
+        XCTAssertEqual(ticket.sprint?.goal, "Payments live")
+        XCTAssertNotNil(ticket.sprint?.end)
+        // A Gravatar is asked not to fall back to initials; Jira's own initials are not a picture.
+        XCTAssertEqual(ticket.assigneeAvatar?.absoluteString, "https://secure.gravatar.com/avatar/abc?d=404&s=96")
+        XCTAssertNil(ticket.reporterAvatar)
+        XCTAssertNotNil(JiraTicket.avatar(["48x48": "https://avatar-management.example/avatars/712020/photo.png"]))
+        XCTAssertTrue(JiraTicket(json: try JSONSerialization.jsonObject(with: Data(json.utf8)))?.sprints.isEmpty ?? false, "no sprint field on the site")
+
+        XCTAssertEqual(JiraLook.priority("Highest"), Theme.red)
+        XCTAssertEqual(JiraLook.priority("Wysoki"), Theme.orange)
+        XCTAssertEqual(JiraLook.priority("Medium"), Theme.yellow)
+        XCTAssertEqual(JiraLook.priority("Niski"), Theme.blue)
+        XCTAssertEqual(JiraLook.priority("Lowest"), Theme.teal)
+        XCTAssertEqual(JiraLook.prioritySymbol("Highest"), "chevron.up.2")
+        XCTAssertEqual(JiraLook.label("backend"), JiraLook.label("Backend"), "a label keeps its colour")
+    }
+
     func testJiraTextBothWays() {
         XCTAssertEqual(JiraTicket.plain("<p>one<br/>two</p><ul><li>a &amp; b</li><li>c</li></ul><p>&lt;tag&gt;</p>"), "one\ntwo\n\n• a & b\n• c\n<tag>")
         XCTAssertEqual(JiraTicket.plain(nil), "")

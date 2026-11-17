@@ -3,10 +3,31 @@ import Foundation
 /// One ticket as Jira's own page shows it: what it is, where it stands,
 /// who has it, the time, the conversation.
 struct JiraTicket: Equatable, Sendable {
+    /// Someone on the ticket. `avatar` is set only for a picture the person
+    /// chose; Jira's generated initials are drawn by the app instead.
+    struct Person: Identifiable, Equatable, Hashable, Sendable {
+        var accountID: String?
+        var name: String
+        var avatar: URL?
+        var id: String { accountID ?? name }
+
+        init(accountID: String?, name: String, avatar: URL? = nil) {
+            self.accountID = accountID
+            self.name = name
+            self.avatar = avatar
+        }
+
+        init?(json: Any?) {
+            guard let item = json as? [String: Any], let name = item["displayName"] as? String else { return nil }
+            self.init(accountID: item["accountId"] as? String, name: name, avatar: JiraTicket.avatar(item["avatarUrls"]))
+        }
+    }
+
     struct Comment: Identifiable, Equatable, Sendable {
         var id: String
         var author: String
         var authorID: String?
+        var authorAvatar: URL?
         var body: String
         var created: Date?
     }
@@ -14,8 +35,59 @@ struct JiraTicket: Equatable, Sendable {
     struct Worklog: Identifiable, Equatable, Sendable {
         var id: String
         var author: String
+        var authorID: String?
+        var authorAvatar: URL?
         var timeSpent: String
         var started: Date?
+    }
+
+    /// Another ticket this one points at: its parent, a sub-task, a blocker.
+    struct Related: Identifiable, Equatable, Sendable {
+        /// How it relates, in Jira's words: "blocks", "is blocked by", "sub-task".
+        var relation: String
+        var key: String
+        var summary: String
+        var status: String
+        var statusCategory: String
+        var type: String?
+        var priority: String?
+        var id: String { relation + key }
+
+        /// The words Jira puts between two tickets, "is blocked by" and the like.
+        var blocking: Bool { relation.lowercased().contains("block") }
+
+        init(relation: String, key: String, summary: String, status: String, statusCategory: String, type: String? = nil, priority: String? = nil) {
+            self.relation = relation
+            self.key = key
+            self.summary = summary
+            self.status = status
+            self.statusCategory = statusCategory
+            self.type = type
+            self.priority = priority
+        }
+
+        init?(relation: String, json: Any?) {
+            guard let item = json as? [String: Any], let key = item["key"] as? String else { return nil }
+            let fields = item["fields"] as? [String: Any] ?? [:]
+            let status = fields["status"] as? [String: Any]
+            self.init(relation: relation, key: key, summary: fields["summary"] as? String ?? "",
+                      status: status?["name"] as? String ?? "", statusCategory: (status?["statusCategory"] as? [String: Any])?["key"] as? String ?? "",
+                      type: (fields["issuetype"] as? [String: Any])?["name"] as? String,
+                      priority: (fields["priority"] as? [String: Any])?["name"] as? String)
+        }
+    }
+
+    /// A sprint the ticket was planned into.
+    struct Sprint: Identifiable, Equatable, Sendable {
+        var id: Int
+        var name: String
+        /// active, future or closed.
+        var state: String
+        var start: Date?
+        var end: Date?
+        var goal: String?
+
+        var active: Bool { state == "active" }
     }
 
     var key: String
@@ -27,11 +99,25 @@ struct JiraTicket: Equatable, Sendable {
     var priority: String?
     var assignee: String?
     var assigneeID: String?
+    var assigneeAvatar: URL?
     var reporter: String?
+    var reporterID: String?
+    var reporterAvatar: URL?
     var description: String
     var labels: [String]
     var due: String?
     var parent: String?
+    /// The parent as a ticket of its own, when Jira sent its summary.
+    var parentTicket: Related?
+    /// Blockers, duplicates, "relates to": both directions, as Jira lists them.
+    var links: [Related] = []
+    var subtasks: [Related] = []
+    /// Read separately from the ticket; empty until then.
+    var watchers: [Person] = []
+    var watchCount: Int = 0
+    var watching = false
+    /// Every sprint the ticket was in, oldest first.
+    var sprints: [Sprint] = []
     var created: Date?
     var updated: Date?
     var estimate: String?
@@ -47,6 +133,37 @@ struct JiraTicket: Equatable, Sendable {
     var statusChangedAt: Date?
 
     var done: Bool { statusCategory == "done" }
+
+    /// The sprint that matters now: the running one, else the next, else the last.
+    var sprint: Sprint? {
+        sprints.first(where: \.active) ?? sprints.first { $0.state == "future" } ?? sprints.last
+    }
+
+    /// A picture the person chose, or nil for Jira's generated initials.
+    /// Gravatar is asked to answer 404 instead of falling back to them.
+    static func avatar(_ urls: Any?) -> URL? {
+        guard let urls = urls as? [String: Any], let text = (urls["48x48"] ?? urls["32x32"] ?? urls["24x24"]) as? String,
+              var parts = URLComponents(string: text) else { return nil }
+        if text.contains("/initials/") && !text.contains("gravatar.com") { return nil }
+        if parts.host?.hasSuffix("gravatar.com") == true {
+            parts.queryItems = [URLQueryItem(name: "d", value: "404"), URLQueryItem(name: "s", value: "96")]
+        }
+        return parts.url
+    }
+
+    /// Jira's sprint field: a list of {id, name, state, startDate, endDate, goal}.
+    static func sprints(_ json: Any?) -> [Sprint] {
+        let list = json as? [[String: Any]] ?? []
+        func day(_ text: Any?) -> Date? {
+            guard let text = text as? String else { return nil }
+            return (try? Date(text, strategy: .iso8601)) ?? (try? Date(text, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
+        }
+        return list.compactMap { item in
+            guard let id = item["id"] as? Int, let name = item["name"] as? String else { return nil }
+            let goal = (item["goal"] as? String).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+            return Sprint(id: id, name: name, state: (item["state"] as? String ?? "").lowercased(), start: day(item["startDate"]), end: day(item["endDate"]), goal: goal)
+        }
+    }
 
     /// Jira's "2026-11-11T19:19:16.211+0100".
     static func date(_ text: Any?) -> Date? {
@@ -90,7 +207,7 @@ struct JiraTicket: Equatable, Sendable {
         return ["type": "doc", "version": 1, "content": paragraphs]
     }
 
-    init?(json: Any) {
+    init?(json: Any, sprintField: String? = nil) {
         guard let root = json as? [String: Any], let key = root["key"] as? String, let fields = root["fields"] as? [String: Any] else { return nil }
         let rendered = root["renderedFields"] as? [String: Any] ?? [:]
         func name(_ field: String, _ part: String = "name") -> String? { (fields[field] as? [String: Any])?[part] as? String }
@@ -103,11 +220,27 @@ struct JiraTicket: Equatable, Sendable {
         priority = name("priority")
         assignee = name("assignee", "displayName")
         assigneeID = name("assignee", "accountId")
+        assigneeAvatar = Self.avatar((fields["assignee"] as? [String: Any])?["avatarUrls"])
         reporter = name("reporter", "displayName")
+        reporterID = name("reporter", "accountId")
+        reporterAvatar = Self.avatar((fields["reporter"] as? [String: Any])?["avatarUrls"])
         description = Self.plain(rendered["description"])
         labels = fields["labels"] as? [String] ?? []
         due = fields["duedate"] as? String
         parent = name("parent", "key")
+        parentTicket = Related(relation: "parent", json: fields["parent"])
+        links = (fields["issuelinks"] as? [[String: Any]] ?? []).compactMap { link in
+            let type = link["type"] as? [String: Any]
+            if let other = link["outwardIssue"] { return Related(relation: type?["outward"] as? String ?? "relates to", json: other) }
+            if let other = link["inwardIssue"] { return Related(relation: type?["inward"] as? String ?? "relates to", json: other) }
+            return nil
+        }
+        subtasks = (fields["subtasks"] as? [[String: Any]] ?? []).compactMap { Related(relation: "sub-task", json: $0) }
+        if let watches = fields["watches"] as? [String: Any] {
+            watchCount = watches["watchCount"] as? Int ?? 0
+            watching = watches["isWatching"] as? Bool ?? false
+        }
+        if let sprintField { sprints = Self.sprints(fields[sprintField]) }
         created = Self.date(fields["created"])
         updated = Self.date(fields["updated"])
         let time = fields["timetracking"] as? [String: Any] ?? [:]
@@ -121,12 +254,14 @@ struct JiraTicket: Equatable, Sendable {
         comments = raw.enumerated().map { index, item in
             let author = item["author"] as? [String: Any]
             return Comment(id: item["id"] as? String ?? "\(index)", author: author?["displayName"] as? String ?? "someone",
-                           authorID: author?["accountId"] as? String,
+                           authorID: author?["accountId"] as? String, authorAvatar: Self.avatar(author?["avatarUrls"]),
                            body: Self.plain(index < shown.count ? shown[index]["body"] : nil), created: Self.date(item["created"]))
         }
         let logs = (fields["worklog"] as? [String: Any])?["worklogs"] as? [[String: Any]] ?? []
         worklogs = logs.enumerated().map { index, item in
-            Worklog(id: item["id"] as? String ?? "\(index)", author: (item["author"] as? [String: Any])?["displayName"] as? String ?? "someone",
+            let author = item["author"] as? [String: Any]
+            return Worklog(id: item["id"] as? String ?? "\(index)", author: author?["displayName"] as? String ?? "someone",
+                    authorID: author?["accountId"] as? String, authorAvatar: Self.avatar(author?["avatarUrls"]),
                     timeSpent: item["timeSpent"] as? String ?? "", started: Self.date(item["started"]))
         }
         // Newest first in Jira's answer: the first entry that changed the status.
@@ -141,7 +276,7 @@ struct JiraTicket: Equatable, Sendable {
 }
 
 extension JiraClient {
-    private func call(_ method: String, _ path: String, json: Any? = nil, query: [URLQueryItem] = []) async throws -> Data {
+    private func call(_ method: String, _ path: String, json: Any? = nil, raw: Data? = nil, query: [URLQueryItem] = []) async throws -> Data {
         var components = URLComponents(url: site.appending(path: path), resolvingAgainstBaseURL: false)
         if !query.isEmpty { components?.queryItems = query }
         guard let url = components?.url else { throw JiraError.notAnswer }
@@ -152,6 +287,9 @@ extension JiraClient {
         if let json {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: json)
+        } else if let raw {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = raw
         }
         let (data, response) = try await session.data(for: request, delegate: AuthGuard.shared)
         guard let http = response as? HTTPURLResponse else { throw JiraError.notAnswer }
@@ -170,12 +308,54 @@ extension JiraClient {
     }
 
     func ticket(_ key: String) async throws -> JiraTicket {
-        let data = try await call("GET", "rest/api/3/issue/\(key)", query: [
+        let sprint = await sprintField()
+        var fields = "summary,status,issuetype,priority,assignee,reporter,description,timetracking,labels,created,updated,duedate,parent,project,comment,worklog,issuelinks,subtasks,watches"
+        if let sprint { fields += "," + sprint }
+        async let reading = call("GET", "rest/api/3/issue/\(key)", query: [
             .init(name: "expand", value: "renderedFields,changelog"),
-            .init(name: "fields", value: "summary,status,issuetype,priority,assignee,reporter,description,timetracking,labels,created,updated,duedate,parent,project,comment,worklog"),
+            .init(name: "fields", value: fields),
         ])
-        guard let ticket = JiraTicket(json: (try? JSONSerialization.jsonObject(with: data)) as Any) else { throw JiraError.notAnswer }
+        async let watching = try? watchers(key)
+        let data = try await reading
+        guard var ticket = JiraTicket(json: (try? JSONSerialization.jsonObject(with: data)) as Any, sprintField: sprint) else { throw JiraError.notAnswer }
+        if let people = await watching {
+            ticket.watchers = people.list
+            ticket.watching = people.watching
+            ticket.watchCount = max(ticket.watchCount, people.list.count)
+        }
         return ticket
+    }
+
+    /// Who follows the ticket, and whether the user does.
+    func watchers(_ key: String) async throws -> (list: [JiraTicket.Person], watching: Bool) {
+        let data = try await call("GET", "rest/api/3/issue/\(key)/watchers")
+        let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        let list = (root["watchers"] as? [Any] ?? []).compactMap { JiraTicket.Person(json: $0) }
+        return (list, root["isWatching"] as? Bool ?? false)
+    }
+
+    func watch(_ key: String, accountID: String) async throws {
+        // Jira takes the account id as a bare JSON string.
+        _ = try await call("POST", "rest/api/3/issue/\(key)/watchers", raw: Data("\"\(accountID)\"".utf8))
+    }
+
+    func unwatch(_ key: String, accountID: String) async throws {
+        _ = try await call("DELETE", "rest/api/3/issue/\(key)/watchers", query: [.init(name: "accountId", value: accountID)])
+    }
+
+    /// The id of the sprint field ("customfield_10020"): it differs between
+    /// sites and is absent where Jira Software is not installed.
+    func sprintField() async -> String? {
+        if let known = await JiraFieldCache.shared.sprint(site) { return known }
+        struct Field: Decodable {
+            struct Schema: Decodable { var custom: String? }
+            var id: String
+            var schema: Schema?
+        }
+        let all: [Field]? = try? await get("rest/api/3/field")
+        let id = all?.first { $0.schema?.custom == "com.pyxis.greenhopper.jira:gh-sprint" }?.id
+        if all != nil { await JiraFieldCache.shared.remember(site, sprint: id) }
+        return id
     }
 
     func myAccountID() async throws -> String {
@@ -227,6 +407,16 @@ extension JiraClient {
     func remove(worklog id: String, of key: String) async throws { _ = try await call("DELETE", "rest/api/3/issue/\(key)/worklog/\(id)") }
 }
 
+/// Field ids that differ between Jira sites, read once per site.
+actor JiraFieldCache {
+    static let shared = JiraFieldCache()
+    private var sprints: [URL: String?] = [:]
+
+    /// .some(nil): the site has no sprint field; nil: not read yet.
+    func sprint(_ site: URL) -> String?? { sprints[site] }
+    func remember(_ site: URL, sprint: String?) { sprints[site] = .some(sprint) }
+}
+
 /// Someone in Jira.
 struct JiraUser: Decodable, Identifiable, Hashable, Sendable {
     var accountId: String
@@ -234,7 +424,18 @@ struct JiraUser: Decodable, Identifiable, Hashable, Sendable {
     var emailAddress: String?
     var active: Bool?
     var accountType: String?
+    var avatarUrls: [String: String]?
     var id: String { accountId }
+    var avatar: URL? { JiraTicket.avatar(avatarUrls) }
+
+    init(accountId: String, displayName: String, emailAddress: String? = nil, active: Bool? = nil, accountType: String? = nil, avatarUrls: [String: String]? = nil) {
+        self.accountId = accountId
+        self.displayName = displayName
+        self.emailAddress = emailAddress
+        self.active = active
+        self.accountType = accountType
+        self.avatarUrls = avatarUrls
+    }
 }
 
 /// Jira's way of writing time: "1h 30m", "45m", "2d", "1.5h", "1w 2d".

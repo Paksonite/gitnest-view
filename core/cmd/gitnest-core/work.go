@@ -441,6 +441,19 @@ func registerWork(srv *rpc.Server) {
 		return nil, err
 	})
 
+	// repo.newcommits counts the commits on HEAD the server has on no branch,
+	// so the app can ask before publishing an empty branch.
+	srv.Handle("repo.newcommits", func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := decodeRepo(raw, &p, &p.Path); err != nil {
+			return nil, err
+		}
+		n, err := gitx.NewCommits(ctx, p.Path)
+		return map[string]int{"count": n}, err
+	})
+
 	srv.Handle("repo.branch.create", func(ctx context.Context, raw json.RawMessage) (any, error) {
 		var p struct {
 			Path string `json:"path"`
