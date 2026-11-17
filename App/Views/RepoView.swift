@@ -51,6 +51,10 @@ struct RepoView: View {
                 tab = wanted
             }
             await model.refreshForge(repo, detailed: true, ifOlderThan: 8)
+            if model.initialOpen == "clone" {
+                model.initialOpen = nil
+                Task { await model.clone(repo) }
+            }
             if model.initialOpen == "release" {
                 model.initialOpen = nil
                 model.sheet = .release(repo)
@@ -176,7 +180,7 @@ struct RepoHeader: View {
                 .foregroundStyle(Theme.secondary)
             }
             Spacer(minLength: 8)
-            if working || cloning { ProgressView().controlSize(.small) }
+            if working { ProgressView().controlSize(.small) }
             if let clone {
                 Button("Fetch", systemImage: "arrow.clockwise") { Task { await model.run(.fetch, on: repo) } }
                     .buttonStyle(ChipButtonStyle())
@@ -200,10 +204,13 @@ struct RepoHeader: View {
                     .buttonStyle(ChipButtonStyle())
                     .help(clone.path)
             } else if repo.empty != true {
-                Button(cloning ? "Cloning…" : "Clone", systemImage: "arrow.down.circle") { Task { await model.clone(repo) } }
-                    .buttonStyle(ChipButtonStyle(prominent: true))
-                    .disabled(cloning)
-                    .help("Clone into \(model.cloneDestination(repo) ?? "")")
+                if cloning {
+                    CloneProgressBar(progress: model.cloneProgress[key], expected: model.cloneSize[key], width: 190, compact: true)
+                } else {
+                    Button("Clone", systemImage: "arrow.down.circle") { Task { await model.clone(repo) } }
+                        .buttonStyle(ChipButtonStyle(prominent: true))
+                        .help("Clone into \(model.cloneDestination(repo) ?? "")")
+                }
             }
             if let url = repo.htmlURL.flatMap(URL.init) {
                 Button("Open in Browser", systemImage: "safari") { openExternal(url) }
@@ -336,5 +343,54 @@ struct LocalState: View {
             }
         }
         .font(.system(size: 11.5).monospacedDigit())
+    }
+}
+
+/// Clone, or how far the clone has come while it runs.
+struct CloneButton: View {
+    @Environment(AppModel.self) private var model
+    let repo: ForgeRepo
+
+    var body: some View {
+        let key = model.slug(repo)?.key ?? ""
+        if model.cloning.contains(key) {
+            CloneProgressBar(progress: model.cloneProgress[key], expected: model.cloneSize[key], width: 340)
+        } else {
+            Button("Clone") { Task { await model.clone(repo) } }.buttonStyle(ChipButtonStyle(prominent: true))
+        }
+    }
+}
+
+/// A clone on its way: git's phase, the share done, the size and speed.
+/// Before git says anything, the server is still being asked.
+struct CloneProgressBar: View {
+    let progress: CoreProgress?
+    /// The repository's size on the server, when it said.
+    var expected: Int64?
+    var width: CGFloat = 220
+    /// One short line: the whole clone's share and the speed.
+    var compact = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let progress {
+                ProgressView(value: progress.overall(expected: expected))
+                    .progressViewStyle(.linear)
+                    .animation(.easeOut(duration: 0.25), value: progress.overall(expected: expected))
+                Text(compact ? progress.shortText(expected: expected) : progress.text(expected: expected))
+                    .font(.system(size: 11)).monospacedDigit()
+                    .foregroundStyle(Theme.secondary)
+                    .lineLimit(compact ? 1 : 2).truncationMode(.middle)
+                    .fixedSize(horizontal: false, vertical: !compact)
+            } else {
+                ProgressView().progressViewStyle(.linear)
+                Text("Connecting to the server…").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            }
+        }
+        .frame(width: width)
+        .help(progress?.text(expected: expected) ?? "Cloning: connecting to the server")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Cloning")
+        .accessibilityValue(progress.map { "\($0.phase), \(Int(($0.overall(expected: expected) * 100).rounded())) percent of the clone" } ?? "starting")
     }
 }

@@ -223,7 +223,7 @@ struct OverviewView: View {
                 }
             } else {
                 Text("Not cloned here.").foregroundStyle(Theme.secondary)
-                Button("Clone") { Task { await model.clone(repo) } }.buttonStyle(ChipButtonStyle(prominent: true))
+                CloneButton(repo: repo)
             }
         }
     }

@@ -83,6 +83,87 @@ struct CloneParams: Encodable, Sendable {
     var url: String
     var dest: String
     var auth: GitAuth?
+    /// Names the clone in the engine's progress notifications.
+    var progress: String?
+}
+
+/// What git says while cloning: "Receiving objects 45% (450/1000), 12.00 MiB | 3.00 MiB/s".
+struct CoreProgress: Decodable, Equatable, Sendable {
+    var id: String
+    var phase: String
+    var percent: Int
+    var done: Int64?
+    var total: Int64?
+    var detail: String?
+
+    /// Bytes received so far: "58.79 MiB | 12.92 MiB/s" → 61 645 865.
+    var received: Int64? {
+        guard let detail, phase == "Receiving objects" else { return nil }
+        let words = (detail.split(separator: "|").first ?? "").split(separator: " ")
+        guard words.count >= 2, let number = Double(words[0]) else { return nil }
+        let scale: Double = switch words[1] {
+        case "GiB": 1_073_741_824
+        case "MiB": 1_048_576
+        case "KiB": 1024
+        default: 1
+        }
+        return Int64(number * scale)
+    }
+
+    /// This phase's share done. git counts objects, so a few big files
+    /// read as 2% at half the bytes; with the repository's size known the
+    /// bytes count too.
+    func part(expected bytes: Int64? = nil) -> Double {
+        var part = Double(min(100, max(0, percent))) / 100
+        if let bytes, bytes > 0, let received {
+            part = max(part, min(0.99, Double(received) / Double(bytes)))
+        }
+        return part
+    }
+
+    /// The whole clone, 0...1: the download is most of it, then the deltas
+    /// are worked out, then the files written.
+    var overall: Double { overall(expected: nil) }
+
+    func overall(expected bytes: Int64?) -> Double {
+        let part = part(expected: bytes)
+        switch phase {
+        case "Enumerating objects", "Counting objects", "Compressing objects": return 0.05 * part
+        case "Receiving objects": return 0.05 + 0.65 * part
+        case "Resolving deltas": return 0.70 + 0.15 * part
+        case "Updating files", "Checking out files": return 0.85 + 0.15 * part
+        default: return 0.05 * part
+        }
+    }
+
+    /// "Cloning 34% · 3.00 MiB/s": the whole clone, and the speed while downloading.
+    var shortText: String { shortText(expected: nil) }
+
+    func shortText(expected bytes: Int64?) -> String {
+        var text = "Cloning \(Int((overall(expected: bytes) * 100).rounded()))%"
+        if let speed = detail?.split(separator: "|").last, detail?.contains("|") == true {
+            text += " · " + speed.trimmingCharacters(in: .whitespaces)
+        }
+        return text
+    }
+
+    /// "Receiving objects · 45% · 12.00 MiB | 3.00 MiB/s".
+    var text: String { text(expected: nil) }
+
+    func text(expected bytes: Int64?) -> String {
+        var parts = [phase, "\(Int((part(expected: bytes) * 100).rounded()))%"]
+        if var detail, !detail.isEmpty {
+            if let bytes, bytes > 0, received != nil {
+                // In git's own units, so the two numbers read alike.
+                let units: [(Double, String)] = [(1_073_741_824, "GiB"), (1_048_576, "MiB"), (1024, "KiB")]
+                let (scale, unit) = units.first { Double(bytes) >= $0.0 } ?? (1, "bytes")
+                let size = "\(Int((Double(bytes) / scale).rounded())) \(unit)"
+                detail = detail.replacingOccurrences(of: " |", with: " of ~\(size) |")
+            }
+            parts.append(detail)
+        }
+        return parts.joined(separator: " · ")
+    }
 }
 
 struct CheckoutParams: Encodable, Sendable {

@@ -389,9 +389,11 @@ struct ForgeRepo: Codable, Identifiable, Hashable, Sendable {
     var openPulls: Int?
     var hasActions: Bool?
     var updatedAt: Date?
+    /// The repository's size on the server in KiB (Forgejo, GitHub; GitLab's statistics).
+    var size: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, owner, description, archived, empty, fork, mirror
+        case id, name, owner, description, archived, empty, fork, mirror, size
         case fullName = "full_name"
         case isPrivate = "private"
         case defaultBranch = "default_branch"

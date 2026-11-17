@@ -162,6 +162,10 @@ final class AppModel {
     // Local clones under the working directory
     var local: [String: Repo] = [:] // by RepoSlug.key
     private(set) var cloning: Set<String> = []
+    /// What git says about each clone running now, by repository key.
+    private(set) var cloneProgress: [String: CoreProgress] = [:]
+    /// The size each running clone will reach, in bytes, when the server said.
+    private(set) var cloneSize: [String: Int64] = [:]
     var busy: Set<String> = [] // fetch / pull / checkout in progress
     private(set) var engineError: String?
     /// Short messages at the bottom of the window ("Pushed feat/x").
@@ -250,6 +254,12 @@ final class AppModel {
         self.core = core
         self.tokens = tokens
         self.defaults = defaults
+        let model = WeakModel(self)
+        Task {
+            await core.setProgressHandler { progress in
+                Task { @MainActor in model.value?.heard(progress) }
+            }
+        }
         if let data = defaults.data(forKey: Key.accounts), let saved = try? JSONDecoder().decode([ForgeAccount].self, from: data) {
             accounts = saved
         }
@@ -288,7 +298,7 @@ final class AppModel {
             try? tokens.setToken(jiraToken, for: settings.tokenKey)
             defaults.set(try? JSONEncoder().encode(settings), forKey: "jira")
         }
-        model.accounts = [ForgeAccount(host: host, login: env["GNV_DEV_LOGIN"])]
+        model.accounts = [ForgeAccount(host: host, login: env["GNV_DEV_LOGIN"], kind: env["GNV_DEV_KIND"].flatMap(ForgeKind.init(rawValue:)))]
         // A second server, to look at everything with two connected.
         if let other = env["GNV_DEV_HOST2"], let otherToken = env["GNV_DEV_TOKEN2"] {
             try? tokens.setToken(otherToken, for: other)
@@ -306,7 +316,7 @@ final class AppModel {
 
     /// The tab a repository opens on, by its name; nil for the default.
     var initialTab: String?
-    /// Development only (`GNV_DEV_OPEN`): "log", "workspace" or "branch"
+    /// Development only (`GNV_DEV_OPEN`): "log", "workspace", "branch" or "clone"
     /// opens that piece of interface at launch, to look at it.
     var initialOpen: String?
     /// Development only (`GNV_DEV_REPO`): the repository selected at launch.
@@ -756,14 +766,32 @@ final class AppModel {
         let ssh = accounts.first { $0.host == slug.host }?.cloneWithSSH == true
         guard let url = ssh ? repo.sshURL : repo.cloneURL else { return }
         cloning.insert(slug.key)
-        defer { cloning.remove(slug.key) }
+        defer {
+            cloning.remove(slug.key)
+            cloneProgress[slug.key] = nil
+            cloneSize[slug.key] = nil
+        }
+        var size = repo.size
+        if size == nil { size = await client(for: slug.host)?.repositorySize(slug) }
+        if let size, size > 0 { cloneSize[slug.key] = Int64(size) * 1024 }
         do {
-            let result: ScanResult = try await core.call("repo.clone", CloneParams(url: url, dest: dest, auth: auth(host: slug.host, forURL: url)))
+            let result: ScanResult = try await core.call("repo.clone", CloneParams(url: url, dest: dest, auth: auth(host: slug.host, forURL: url), progress: slug.key))
             index(result.repos, replacing: false)
             toast("Cloned \(repo.name)")
         } catch {
             toast("Cloning \(repo.name) failed: \(error.localizedDescription)", .error)
         }
+    }
+
+    func isCloning(_ repo: ForgeRepo) -> Bool {
+        slug(repo).map { cloning.contains($0.key) } ?? false
+    }
+
+    /// A clone's progress from the engine. A late note after the clone
+    /// ended must not bring the bar back.
+    fileprivate func heard(_ progress: CoreProgress) {
+        guard cloning.contains(progress.id), cloneProgress[progress.id] != progress else { return }
+        cloneProgress[progress.id] = progress
     }
 
     /// Clones every repository of the workspace that is not cloned yet.
@@ -1453,4 +1481,10 @@ final class AppModel {
         section = .repositories
         await refreshSelected()
     }
+}
+
+/// The model, held weakly by the engine's progress callback.
+private final class WeakModel: @unchecked Sendable {
+    weak var value: AppModel?
+    init(_ value: AppModel) { self.value = value }
 }

@@ -74,15 +74,28 @@ func Clone(ctx context.Context, url, dest string) error {
 	ctx, cancel := context.WithTimeout(ctx, CloneTimeout)
 	defer cancel()
 
+	report, _ := ctx.Value(progressKey{}).(func(Progress))
 	args := []string{"clone", "--quiet", "--", url, dest}
+	if report != nil {
+		args = []string{"clone", "--progress", "--", url, dest}
+	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = parent
 	cmd.Env = append(baseEnv(kNet), envFrom(ctx)...)
 	setProcGroup(cmd)
 	cmd.WaitDelay = 2 * time.Second
 	var errb bytes.Buffer
-	cmd.Stderr = &errb
-	if err := cmd.Run(); err != nil {
+	if report != nil {
+		cmd.Stderr = &progressWriter{report: report, rest: &errb}
+	} else {
+		cmd.Stderr = &errb
+	}
+	err = cmd.Start()
+	if err == nil {
+		lowerPriority(cmd)
+		err = cmd.Wait()
+	}
+	if err != nil {
 		ge := &Error{Args: []string{"clone", Redact(url)}, Err: err, Output: Redact(strings.TrimSpace(errb.String()))}
 		switch {
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
@@ -241,4 +254,95 @@ func BlockHistory(ctx context.Context, dir, file string, start, end, max int) ([
 // ShowFile returns a file as it is in a revision.
 func ShowFile(ctx context.Context, dir, rev, file string) (string, error) {
 	return run(ctx, kRead, dir, nil, "show", rev+":"+file)
+}
+
+// Progress is one of git's progress lines: "Receiving objects:  45% (450/1000), 12.00 MiB | 3.00 MiB/s".
+type Progress struct {
+	Phase   string `json:"phase"`
+	Percent int    `json:"percent"`
+	Done    int64  `json:"done"`
+	Total   int64  `json:"total"`
+	// Detail is what follows the counts: the size and speed so far.
+	Detail string `json:"detail,omitempty"`
+}
+
+type progressKey struct{}
+
+// WithProgress has Clone report git's progress to fn as it goes.
+func WithProgress(ctx context.Context, fn func(Progress)) context.Context {
+	return context.WithValue(ctx, progressKey{}, fn)
+}
+
+// progressWriter reads git's stderr: progress lines (ended by \r while they
+// change) go to report, once per change of phase or percent; everything
+// else is kept for the error message.
+type progressWriter struct {
+	report func(Progress)
+	rest   *bytes.Buffer
+	line   []byte
+	last   Progress
+}
+
+func (w *progressWriter) Write(b []byte) (int, error) {
+	for _, c := range b {
+		if c == '\r' || c == '\n' {
+			w.flush()
+			continue
+		}
+		w.line = append(w.line, c)
+	}
+	return len(b), nil
+}
+
+func (w *progressWriter) flush() {
+	if len(w.line) == 0 {
+		return
+	}
+	text := string(w.line)
+	w.line = w.line[:0]
+	if p, ok := ParseProgress(text); ok {
+		if p.Phase != w.last.Phase || p.Percent != w.last.Percent {
+			w.last = p
+			w.report(p)
+		}
+		return
+	}
+	if w.rest.Len() < 64<<10 {
+		w.rest.WriteString(text)
+		w.rest.WriteByte('\n')
+	}
+}
+
+// ParseProgress reads "Phase:  45% (450/1000), more" (with or without a
+// "remote: " in front); ok is false for any other line.
+func ParseProgress(line string) (Progress, bool) {
+	line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "remote:"))
+	colon := strings.Index(line, ": ")
+	if colon <= 0 {
+		return Progress{}, false
+	}
+	phase, rest := line[:colon], strings.TrimSpace(line[colon+2:])
+	pct := strings.Index(rest, "%")
+	if pct <= 0 {
+		return Progress{}, false
+	}
+	percent, err := strconv.Atoi(strings.TrimSpace(rest[:pct]))
+	if err != nil {
+		return Progress{}, false
+	}
+	p := Progress{Phase: phase, Percent: percent}
+	rest = strings.TrimSpace(rest[pct+1:])
+	if strings.HasPrefix(rest, "(") {
+		if end := strings.Index(rest, ")"); end > 0 {
+			if done, total, ok := strings.Cut(rest[1:end], "/"); ok {
+				p.Done, _ = strconv.ParseInt(done, 10, 64)
+				p.Total, _ = strconv.ParseInt(total, 10, 64)
+			}
+			rest = strings.TrimSpace(rest[end+1:])
+		}
+	}
+	rest = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(rest, ",")), ", done."))
+	rest = strings.TrimSuffix(rest, "done.")
+	p.Detail = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(rest), ","))
+	return p, true
 }

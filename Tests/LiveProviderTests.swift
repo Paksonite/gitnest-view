@@ -134,6 +134,17 @@ final class LiveProviderTests: XCTestCase {
         XCTAssertEqual(job.name, "test: plan")
         XCTAssertEqual(job.runID, 55)
         XCTAssertTrue(job.hasStarted)
+        let receiving = CoreProgress(id: "k", phase: "Receiving objects", percent: 50, done: 5, total: 10, detail: "12.00 MiB | 3.00 MiB/s")
+        XCTAssertEqual(receiving.overall, 0.375, accuracy: 0.001)
+        XCTAssertEqual(receiving.shortText, "Cloning 38% · 3.00 MiB/s")
+        XCTAssertEqual(receiving.text, "Receiving objects · 50% · 12.00 MiB | 3.00 MiB/s")
+        XCTAssertEqual(CoreProgress(id: "k", phase: "Updating files", percent: 100).overall, 1, accuracy: 0.001)
+        // Few big files: git says 2% by objects at 60 MiB of 150; the bytes say 40%.
+        let big = CoreProgress(id: "k", phase: "Receiving objects", percent: 2, detail: "60.00 MiB | 12.00 MiB/s")
+        XCTAssertEqual(big.received, 60 << 20)
+        XCTAssertEqual(big.part(expected: 150 << 20), 0.4, accuracy: 0.001)
+        XCTAssertEqual(big.text(expected: 150 << 20), "Receiving objects · 40% · 60.00 MiB of ~150 MiB | 12.00 MiB/s")
+        XCTAssertEqual(big.part(), 0.02, accuracy: 0.001)
         XCTAssertEqual(GitLabClient.escape("group/sub/name"), "group%2Fsub%2Fname")
         let repo = try XCTUnwrap(GitLabClient.repo(["id": 1, "path": "infra", "path_with_namespace": "ops/aws/infra", "namespace": ["id": 2, "full_path": "ops/aws"],
                                                    "default_branch": "main", "http_url_to_repo": "https://gl/ops/aws/infra.git", "visibility": "private"]))
@@ -288,6 +299,57 @@ final class LiveProviderTests: XCTestCase {
         XCTAssertEqual(model.auth(host: host, forURL: "https://\(host)/g/p.git")?.user, "oauth2")
         await model.loadWorkspaces()
         XCTAssertFalse(model.workspaces.isEmpty)
+    }
+
+    /// A big clone tells how far it is, and git runs below the app's priority.
+    func testCloneReportsProgress() async throws {
+        guard let host = env["GNV_GITLAB_HOST"], let token = env["GNV_GITLAB_TOKEN"], let full = env["GNV_GITLAB_HEAVY"] else { throw XCTSkip("no heavy GitLab repository configured") }
+        let suite = "gnv-clone-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let folder = FileManager.default.temporaryDirectory.appending(path: "gnv-clone-\(UUID().uuidString)")
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: folder)
+        }
+        let model = AppModel(tokens: MemoryTokenStore(), defaults: defaults)
+        try await model.connect(host: host, token: token, kind: .gitlab)
+        model.setWorkdir(folder)
+        await model.loadWorkspaces()
+        let top = String(full.split(separator: "/").first ?? "")
+        model.select(try XCTUnwrap(model.workspaces.first { $0.owner == top }))
+        await model.loadRepos(quiet: false)
+        let repo = try XCTUnwrap(model.repos.first { $0.fullName == full })
+        let key = try XCTUnwrap(model.slug(repo)?.key)
+
+        var seen: [CoreProgress] = []
+        var niceness: Set<String> = []
+        let watcher = Task { @MainActor in
+            while !Task.isCancelled {
+                if let now = model.cloneProgress[key], seen.last != now { seen.append(now) }
+                let ps = Process()
+                ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+                ps.arguments = ["-Ao", "nice=,command="]
+                let pipe = Pipe()
+                ps.standardOutput = pipe
+                try? ps.run()
+                let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                for line in text.split(separator: "\n") where line.contains("git") && (line.contains("index-pack") || line.contains("clone")) && line.contains(repo.name) || line.contains("index-pack") {
+                    niceness.insert(String(line.split(separator: " ").first ?? ""))
+                }
+                try? await Task.sleep(for: .milliseconds(40))
+            }
+        }
+        await model.clone(repo)
+        watcher.cancel()
+        _ = await watcher.value
+
+        XCTAssertNotNil(model.clone(of: repo), model.toasts.map(\.text).joined(separator: "; "))
+        XCTAssertNil(model.cloneProgress[key], "the bar goes away when the clone is done")
+        XCTAssertTrue(seen.contains { $0.phase == "Receiving objects" }, "\(seen.map(\.text))")
+        let shares = seen.map(\.overall)
+        XCTAssertEqual(shares, shares.sorted(), "the bar only moves forward: \(shares)")
+        XCTAssertGreaterThan(seen.count, 5, "the bar moves while the clone runs")
+        XCTAssertTrue(niceness.contains("10"), "git runs at nice 10: \(niceness)")
     }
 
     func testForgejoIsFoundOutToo() async throws {

@@ -49,3 +49,23 @@ func TestCloneAndTokenEnv(t *testing.T) {
 		t.Errorf("git did not see the header: %q %v", out, err)
 	}
 }
+
+func TestParseProgress(t *testing.T) {
+	cases := map[string]Progress{
+		"Receiving objects:  45% (450/1000), 12.00 MiB | 3.00 MiB/s": {Phase: "Receiving objects", Percent: 45, Done: 450, Total: 1000, Detail: "12.00 MiB | 3.00 MiB/s"},
+		"remote: Counting objects: 100% (8163/8163), done.":           {Phase: "Counting objects", Percent: 100, Done: 8163, Total: 8163},
+		"Resolving deltas:   7% (70/1000)":                            {Phase: "Resolving deltas", Percent: 7, Done: 70, Total: 1000},
+		"Updating files: 100% (10821/10821), done.":                   {Phase: "Updating files", Percent: 100, Done: 10821, Total: 10821},
+	}
+	for line, want := range cases {
+		got, ok := ParseProgress(line)
+		if !ok || got != want {
+			t.Errorf("%q: got %+v %v, want %+v", line, got, ok, want)
+		}
+	}
+	for _, line := range []string{"Cloning into 'x'...", "fatal: repository not found", "warning: 50 percent"} {
+		if _, ok := ParseProgress(line); ok {
+			t.Errorf("%q is not progress", line)
+		}
+	}
+}

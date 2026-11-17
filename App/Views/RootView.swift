@@ -301,6 +301,7 @@ struct SidebarView: View {
         let key = model.slug(repo)?.key ?? ""
         return RepoRow(repo: repo, name: RepoName.split(repo.name, prefixes: prefixes), cloned: model.local[key] != nil,
                        latest: model.forge[key]?.latest, reasons: reasons[repo.id] ?? [], cloning: model.cloning.contains(key),
+                       cloneShare: model.cloneProgress[key].map { ($0.overall(expected: model.cloneSize[key]) * 20).rounded() / 20 },
                        selected: model.selection == repo.id && model.section == .repositories, quiet: quiet, pinned: model.isPinned(repo))
             .equatable()
     }
@@ -486,6 +487,8 @@ struct RepoRow: View, Equatable {
     let latest: CheckState?
     let reasons: [AttentionReason]
     let cloning: Bool
+    /// How much of the clone is done, in steps of 5%: the row redraws only that often.
+    let cloneShare: Double?
     let selected: Bool
     /// Drawn dimmer: nothing to do here.
     let quiet: Bool
@@ -495,7 +498,7 @@ struct RepoRow: View, Equatable {
 
     nonisolated static func == (a: RepoRow, b: RepoRow) -> Bool {
         a.repo == b.repo && a.name == b.name && a.cloned == b.cloned && a.latest == b.latest && a.reasons == b.reasons
-            && a.cloning == b.cloning && a.selected == b.selected && a.quiet == b.quiet && a.pinned == b.pinned
+            && a.cloning == b.cloning && a.cloneShare == b.cloneShare && a.selected == b.selected && a.quiet == b.quiet && a.pinned == b.pinned
     }
 
     // The model is read only in actions: a row must not redraw with it.
@@ -522,7 +525,12 @@ struct RepoRow: View, Equatable {
                     .help("\(pulls) open pull requests")
                 }
                 if cloning {
-                    ProgressView().controlSize(.mini)
+                    if let cloneShare {
+                        ProgressView(value: cloneShare).progressViewStyle(.circular).controlSize(.mini)
+                            .help("Cloning: \(Int(cloneShare * 100))%")
+                    } else {
+                        ProgressView().controlSize(.mini).help("Cloning: connecting to the server")
+                    }
                 } else if !cloned, hovering, repo.empty != true {
                     Button("Clone", systemImage: "arrow.down.circle") { Task { await model.clone(repo) } }
                         .labelStyle(.iconOnly)

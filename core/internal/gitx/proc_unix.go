@@ -15,3 +15,12 @@ func setProcGroup(cmd *exec.Cmd) {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 }
+
+// lowerPriority makes a long, heavy git (a clone unpacking a big pack on
+// every core) yield to the app: nice 10 for its group, inherited by the
+// index-pack and checkout it starts.
+func lowerPriority(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		_ = syscall.Setpriority(syscall.PRIO_PGRP, cmd.Process.Pid, 10)
+	}
+}
