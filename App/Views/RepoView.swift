@@ -51,6 +51,16 @@ struct RepoView: View {
                 tab = wanted
             }
             await model.refreshForge(repo, detailed: true, ifOlderThan: 8)
+            if let file = ProcessInfo.processInfo.environment["GNV_DEV_FILE"], model.initialOpen == "file" || model.initialOpen == "files" {
+                model.initialOpen = nil
+                for _ in 0..<50 where model.clone(of: repo) == nil { try? await Task.sleep(for: .milliseconds(100)) }
+                model.fileTarget = FileTarget(repo: repo, file: file, line: nil)
+            }
+            if model.initialOpen == "pullall" {
+                model.initialOpen = nil
+                for _ in 0..<50 where model.clone(of: repo) == nil { try? await Task.sleep(for: .milliseconds(100)) }
+                model.sheet = .pullAll
+            }
             if model.initialOpen == "pull" {
                 model.initialOpen = nil
                 // The clones are found a moment after launch.
@@ -85,6 +95,14 @@ struct RepoView: View {
         }
     }
 
+    /// Open pull requests: as read with the repository's details, else as
+    /// the server's listing counted them (Forgejo), before the details come.
+    private var openPulls: Int? {
+        let state = model.forgeState(repo)
+        if state.loaded { return state.pulls.count { $0.state == "open" } }
+        return repo.openPulls
+    }
+
     private var tabs: some View {
         HStack(spacing: 4) {
             ForEach(RepoTab.allCases) { item in
@@ -97,8 +115,12 @@ struct RepoView: View {
                         if item == .changes, let changes = model.clone(of: repo)?.changes, changes > 0 {
                             Text("\(changes)").font(.system(size: 11)).foregroundStyle(Theme.orange).monospacedDigit()
                         }
-                        if item == .pulls, let count = repo.openPulls, count > 0 {
-                            Text("\(count)").font(.system(size: 11)).foregroundStyle(Theme.secondary).monospacedDigit()
+                        if item == .pulls, let count = openPulls, count > 0 {
+                            Text("\(count)").font(.system(size: 11, weight: .medium)).monospacedDigit()
+                                .foregroundStyle(Theme.blue)
+                                .padding(.horizontal, 5).frame(minWidth: 17, minHeight: 16)
+                                .background(Theme.blue.opacity(0.15), in: Capsule())
+                                .help("\(count) open \(count == 1 ? "pull request" : "pull requests")")
                         }
                     }
                     .foregroundStyle(tab == item ? Theme.text : Theme.secondary)

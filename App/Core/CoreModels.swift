@@ -294,6 +294,15 @@ struct BehindBranch: Decodable, Identifiable, Hashable, Sendable {
     var ahead: Int
     var ok: Bool
     var note: String
+    /// The newest commits the pull brings (up to 30), newest first.
+    var incoming: [Incoming]?
+
+    struct Incoming: Decodable, Hashable, Sendable {
+        var short: String
+        var subject: String
+        var author: String
+        var when: String
+    }
 
     var id: String { path + "\u{1F}" + branch }
 }
@@ -468,4 +477,18 @@ struct BranchComparison: Decodable, Equatable, Sendable {
     var added: Int { files.reduce(0) { $0 + $1.added } }
     var removed: Int { files.reduce(0) { $0 + $1.removed } }
     var deletedFiles: [File] { files.filter(\.deleted) }
+}
+
+/// A file's uncommitted lines against the last commit (`repo.linechanges`).
+struct LineChanges: Decodable, Equatable, Sendable {
+    var added: [Int]
+    var modified: [Int]
+    /// Lines were removed after this line (0: at the top).
+    var deleted: [Int]
+    var untracked: Bool?
+
+    var count: Int { added.count + modified.count + deleted.count }
+    var isEmpty: Bool { count == 0 && untracked != true }
+    /// The first changed line, to open the file there.
+    var first: Int? { (added + modified + deleted.map { max(1, $0) }).min() }
 }

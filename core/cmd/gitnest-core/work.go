@@ -193,6 +193,8 @@ type PullRow struct {
 	// OK: it can be fast-forwarded; Note says why not, or what to know.
 	OK   bool   `json:"ok"`
 	Note string `json:"note"`
+	// Incoming: the newest commits the pull brings, newest first.
+	Incoming []gitx.Incoming `json:"incoming"`
 }
 
 type repoAuth struct {
@@ -241,6 +243,7 @@ func behindRows(ctx context.Context, dir string) []PullRow {
 		case b.Current:
 			r.Note = "checked out"
 		}
+		r.Incoming = gitx.IncomingCommits(ctx, dir, "refs/heads/"+b.Name, b.Upstream, 30)
 		rows = append(rows, r)
 	}
 	return rows
@@ -274,6 +277,18 @@ func registerWork(srv *rpc.Server) {
 			return nil, err
 		}
 		return toFileDiff(p.File.Path, p.Staged, d), nil
+	})
+
+	// repo.linechanges: which lines of a file differ from the last commit.
+	srv.Handle("repo.linechanges", func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var p struct {
+			Path string `json:"path"`
+			File string `json:"file"`
+		}
+		if err := decodeRepo(raw, &p, &p.Path); err != nil {
+			return nil, err
+		}
+		return gitx.FileLineChanges(ctx, p.Path, p.File)
 	})
 
 	srv.Handle("repo.stage", func(ctx context.Context, raw json.RawMessage) (any, error) {

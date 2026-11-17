@@ -732,6 +732,8 @@ struct PullAllSheet: View {
     @State private var result: FetchAllResult?
     @State private var chosen: Set<String> = []
     @State private var pulled: FastForwardResult?
+    /// Rows whose incoming commits are all shown.
+    @State private var expanded: Set<String> = []
 
     enum Phase { case fetching, choosing, pulling, done }
 
@@ -785,30 +787,62 @@ struct PullAllSheet: View {
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                     if index > 0 { HLine() }
-                    Toggle(isOn: Binding(get: { chosen.contains(row.id) }, set: { on in
-                        if on { chosen.insert(row.id) } else { chosen.remove(row.id) }
-                    })) {
-                        HStack(spacing: 8) {
-                            Text(name(row.path)).lineLimit(1)
-                            Text(row.branch).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Theme.secondary).lineLimit(1)
-                            Text("↓\(row.behind)").font(.system(size: 11.5).monospacedDigit()).foregroundStyle(Theme.purple)
-                            Spacer(minLength: 4)
-                            if !row.note.isEmpty {
-                                Text(row.note).font(.system(size: 11)).foregroundStyle(row.ok ? Theme.tertiary : Theme.orange).lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Toggle(isOn: Binding(get: { chosen.contains(row.id) }, set: { on in
+                            if on { chosen.insert(row.id) } else { chosen.remove(row.id) }
+                        })) {
+                            HStack(spacing: 8) {
+                                Text(name(row.path)).lineLimit(1)
+                                Text(row.branch).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Theme.secondary).lineLimit(1)
+                                Text("↓\(row.behind)").font(.system(size: 11.5).monospacedDigit()).foregroundStyle(Theme.purple)
+                                Spacer(minLength: 4)
+                                if !row.note.isEmpty {
+                                    Text(row.note).font(.system(size: 11)).foregroundStyle(row.ok ? Theme.tertiary : Theme.orange).lineLimit(1)
+                                }
                             }
                         }
+                        .toggleStyle(.checkbox)
+                        .disabled(!row.ok || phase == .pulling)
+                        .frame(height: 26)
+                        incoming(row)
                     }
-                    .toggleStyle(.checkbox)
-                    .disabled(!row.ok || phase == .pulling)
                     .padding(.horizontal, 10)
-                    .frame(height: 32)
+                    .padding(.vertical, 4)
                 }
             }
         }
-        .frame(maxHeight: 320)
+        .frame(maxHeight: 420)
         .fixedSize(horizontal: false, vertical: true)
         .background(Theme.inset, in: RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
+    }
+
+    /// What the pull brings: the newest commits, all of them on request.
+    @ViewBuilder private func incoming(_ row: BehindBranch) -> some View {
+        let commits = row.incoming ?? []
+        let open = expanded.contains(row.id)
+        let shown = open ? commits : Array(commits.prefix(3))
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(shown, id: \.short) { commit in
+                HStack(spacing: 7) {
+                    Text(commit.short).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.tertiary)
+                    Text(commit.subject).font(.system(size: 11.5)).lineLimit(1)
+                    Spacer(minLength: 6)
+                    Text("\(commit.author) · \(commit.when)").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary).lineLimit(1)
+                }
+                .help("\(commit.short) \(commit.subject)\n\(commit.author), \(commit.when)")
+            }
+            if commits.count > 3 {
+                Button(open ? "Show fewer" : "Show all \(commits.count)") {
+                    if open { expanded.remove(row.id) } else { expanded.insert(row.id) }
+                }
+                .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.blue)
+            }
+            if open, row.behind > commits.count {
+                Text("and \(row.behind - commits.count) older").font(.system(size: 11)).foregroundStyle(Theme.tertiary)
+            }
+        }
+        .padding(.leading, 22)
     }
 
     @ViewBuilder private var summary: some View {

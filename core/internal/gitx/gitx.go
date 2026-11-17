@@ -1506,3 +1506,29 @@ func parseChanged(status, nums string) []ChangedFile {
 	}
 	return files
 }
+
+// Incoming is a commit a pull would bring.
+type Incoming struct {
+	Short   string `json:"short"`
+	Subject string `json:"subject"`
+	Author  string `json:"author"`
+	When    string `json:"when"`
+}
+
+// IncomingCommits lists up to n commits upstream has that branch lacks,
+// newest first; none when git cannot say.
+func IncomingCommits(ctx context.Context, dir, branch, upstream string, n int) []Incoming {
+	out, err := run(ctx, kRead, dir, nil, "log", "--no-color", "-n", strconv.Itoa(n),
+		"--format=%h%x1f%s%x1f%an%x1f%cr", branch+".."+upstream, "--")
+	if err != nil {
+		return nil
+	}
+	var list []Incoming
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		f := strings.Split(l, "\x1f")
+		if len(f) == 4 {
+			list = append(list, Incoming{Short: f[0], Subject: f[1], Author: f[2], When: f[3]})
+		}
+	}
+	return list
+}

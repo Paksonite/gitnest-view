@@ -197,6 +197,8 @@ final class AppModel {
     var logTarget: LogTarget?
     var sheet: AppSheet?
     var repoTab: RepoTab = .overview
+    /// A file the Changes tab should show when it opens (from the file pane).
+    var changesFocus: String?
     var paletteOpen = false
     /// Opens the main window again after it was closed; set by a view that
     /// lives as long as the app (the menu bar item).
@@ -324,7 +326,7 @@ final class AppModel {
 
     /// The tab a repository opens on, by its name; nil for the default.
     var initialTab: String?
-    /// Development only (`GNV_DEV_OPEN`): "log", "workspace", "branch", "clone" or "pull"
+    /// Development only (`GNV_DEV_OPEN`): "log", "workspace", "branch", "clone", "pull", "pullall", "file" or "files"
     /// opens that piece of interface at launch, to look at it.
     var initialOpen: String?
     /// Development only (`GNV_DEV_REPO`): the repository selected at launch.
