@@ -259,7 +259,7 @@ struct ReleaseSheet: View {
                   into == base.trimmingCharacters(in: .whitespaces) else { return }
             draft = nil
             switch error {
-            case ForgejoClient.ForgeError.notFound, ForgejoClient.ForgeError.http(500):
+            case ForgeError.notFound, ForgeError.http(500):
                 // Some servers answer a missing branch with 500 instead of 404.
                 self.error = "Cannot compare: check that the branches \(from) and \(into) exist on the server."
             default:

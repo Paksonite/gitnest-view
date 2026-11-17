@@ -67,8 +67,11 @@ struct ForgeAccount: Codable, Identifiable, Hashable, Sendable {
     /// Clone over SSH with the user's own keys; otherwise over HTTPS with
     /// the access token.
     var cloneWithSSH: Bool?
+    /// Forgejo when absent: accounts saved before GitHub and GitLab came.
+    var kind: ForgeKind?
 
     var id: String { host }
+    var forgeKind: ForgeKind { kind ?? .forgejo }
 
     /// "forge.example.com", whatever the user pasted (a URL, a trailing slash).
     static func normalize(_ input: String) -> String {

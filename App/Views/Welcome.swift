@@ -77,7 +77,12 @@ struct SetupWizard: View {
     @State private var working = false
     @State private var error: String?
     @State private var version: String?
+    /// Nil: ask the server what it is.
+    @State private var wantedKind: ForgeKind?
+    @State private var foundKind: ForgeKind?
     @State private var folder = AppModel.suggestedWorkdir
+
+    private var kind: ForgeKind { wantedKind ?? foundKind ?? ForgeKind.guess(host: ForgeAccount.normalize(host)) ?? .forgejo }
 
     private let titles = ["Server", "Token", "Workspace", "Folder", "Finish"]
 
@@ -143,21 +148,25 @@ struct SetupWizard: View {
     @ViewBuilder private var content: some View {
         switch step {
         case 0:
-            heading("Where is your Forgejo?", "The address you open in the browser.")
-            TextField("Server", text: $host, prompt: Text("forgejo.example.com")).textFieldStyle(.plain).font(.system(size: 13.5))
+            heading("Where is your Git server?", "The address you open in the browser. Forgejo, Gitea, GitLab and GitHub are understood.")
+            KindPicker(kind: $wantedKind, host: $host)
+            TextField("Server", text: $host, prompt: Text(wantedKind == .github ? "github.com" : wantedKind == .gitlab ? "gitlab.example.com" : "git.example.com")).textFieldStyle(.plain).font(.system(size: 13.5))
                 .padding(.horizontal, 10).frame(height: 34)
                 .background(Theme.inset, in: RoundedRectangle(cornerRadius: 7)).overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.border))
                 .autocorrectionDisabled()
                 .onSubmit { Task { await checkServer() } }
-            if let version { Label("Forgejo \(version) answers there.", systemImage: "checkmark.circle.fill").font(.system(size: 12)).foregroundStyle(Theme.green) }
+            if let foundKind {
+                Label(version.map { "\(ServerVersion.text($0, kind: foundKind)) answers there." } ?? "\(foundKind.title) answers there.", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 12)).foregroundStyle(Theme.green)
+            }
         case 1:
             heading("An access token", "GitNest signs in with a token, not your password. It is kept in the Keychain; macOS asks once whether GitNest View may read it — choose Always Allow.")
             HStack(spacing: 8) {
                 Button("Create a Token on \(ServerName.short(host))…", systemImage: "arrow.up.right.square") {
-                    if let url = URL(string: "https://\(ForgeAccount.normalize(host))/user/settings/applications") { openExternal(url) }
+                    if let url = kind.tokenPage(host: ForgeAccount.normalize(host)) { openExternal(url) }
                 }
                 .buttonStyle(ChipButtonStyle())
-                Text("read + write: repository, issue, notification · read: organization, user")
+                Text(kind.scopeHint)
                     .font(.system(size: 11)).foregroundStyle(Theme.tertiary).fixedSize(horizontal: false, vertical: true)
             }
             if let account = model.accounts.first(where: { $0.host == ForgeAccount.normalize(host) }) {
@@ -264,21 +273,25 @@ struct SetupWizard: View {
         step = to
     }
 
-    /// Is there a Forgejo at this address at all?
+    /// Is there a Git server at this address at all, and which kind?
     private func checkServer() async {
         working = true
         defer { working = false }
         error = nil
-        let client = ForgejoClient(host: ForgeAccount.normalize(host), token: nil, session: model.session)
+        let address = ForgeAccount.normalize(host)
         do {
-            version = try await client.version()
-            go(1)
-        } catch ForgejoClient.ForgeError.unauthorized, ForgejoClient.ForgeError.forbidden {
-            // A private server answers only to a token: fine, go on.
-            version = nil
+            var detected = wantedKind
+            if detected == nil { detected = try await model.detectKind(host: address) }
+            guard let found = detected else {
+                self.error = "\(address) does not answer like Forgejo, Gitea, GitLab or GitHub. Check the address, or pick the kind of server above."
+                return
+            }
+            foundKind = found
+            // GitLab and private servers tell their version only to a token.
+            version = try? await AppModel.makeClient(found, host: address, token: nil, session: model.session).version()
             go(1)
         } catch {
-            self.error = "No Forgejo answers at \(ForgeAccount.normalize(host)): \(error.localizedDescription) Check the address, the VPN, the certificate."
+            self.error = "Nothing answers at \(address): \(error.localizedDescription) Check the address, the VPN, the certificate."
         }
     }
 
@@ -288,7 +301,7 @@ struct SetupWizard: View {
         error = nil
         model.wizardOpen = true // stays on screen once the account exists
         do {
-            try await model.connect(host: host, token: token)
+            try await model.connect(host: host, token: token, kind: wantedKind ?? foundKind)
             token = ""
             // No folder yet, so nothing was loaded: the next step needs the organisations.
             await model.loadWorkspaces()
@@ -408,5 +421,31 @@ struct TourLayer: View {
     private func move(to index: Int) {
         Tour.stops[index].show(model)
         model.tourStep = index
+    }
+}
+
+/// Which kind of server: found out by asking, or said by the user.
+struct KindPicker: View {
+    @Binding var kind: ForgeKind?
+    @Binding var host: String
+
+    var body: some View {
+        Picker("Kind of server", selection: Binding(get: { kind?.rawValue ?? "auto" }, set: { value in
+            kind = ForgeKind(rawValue: value)
+            if kind == .github, host.trimmingCharacters(in: .whitespaces).isEmpty { host = "github.com" }
+        })) {
+            Text("Find out").tag("auto")
+            ForEach(ForgeKind.allCases) { Text($0.title).tag($0.rawValue) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .accessibilityLabel("Kind of server")
+    }
+}
+
+/// "Forgejo 17.0.1", "GitLab 19.5.6", "github.com".
+enum ServerVersion {
+    static func text(_ version: String, kind: ForgeKind) -> String {
+        kind == .forgejo ? "Forgejo \(version)" : version
     }
 }

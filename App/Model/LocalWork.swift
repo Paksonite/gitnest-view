@@ -453,7 +453,7 @@ extension AppModel {
 extension AppModel {
     /// The diff of a pull request, all of it or only `file`.
     func pullDiff(_ target: DiffTarget) async throws -> String {
-        guard let client = client(for: target.repo.host) else { throw ForgejoClient.ForgeError.notAnswer }
+        guard let client = client(for: target.repo.host) else { throw ForgeError.notAnswer }
         let whole = try await client.pullDiff(target.repo, number: target.number)
         guard let file = target.file else { return whole }
         return Self.section(of: whole, for: file)

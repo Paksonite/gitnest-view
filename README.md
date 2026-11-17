@@ -2,7 +2,8 @@
 
 **GitNest Desktop for Mac** — [gitnest](https://github.com/Paksonite/gitnest)
 as a native macOS app: every git repository on one screen, with the pull
-requests, reviews, pipeline checks and live job logs of your Forgejo server.
+requests, reviews, pipeline checks and live job logs of your Forgejo, Gitea,
+GitLab or GitHub server.
 
 GitNest View is gitnest: its engine is gitnest's own git code.
 
@@ -46,7 +47,9 @@ tell you without switching windows.
 - Clone one repository or all of a workspace with one click; open a clone
   in your editor or terminal.
 
-**Pull requests and pipelines** on a connected Forgejo server: reviews
+**Pull requests and pipelines** on a connected server (Forgejo or Gitea,
+GitLab self-hosted or gitlab.com, GitHub or GitHub Enterprise; the kind is
+found out from the address): reviews
 (with the approvals the branch protection requires), checks, commits,
 files, the Terraform or OpenTofu plan read from the pipeline's log (or its
 error, when it failed), the apply after the merge, and only the jobs that
@@ -56,8 +59,10 @@ the commits. Actions lists the workflows, starts one by hand with its
 inputs, re-runs and cancels, and shows a job's log step by step, coloured,
 followed live while it runs.
 
-Requires macOS 14 or later on Apple silicon, `git`, and Forgejo 16 or later.
-The token needs read access to repositories, organisations, issues and your
+Requires macOS 14 or later on Apple silicon, `git`, and Forgejo 16 or later,
+a recent GitLab, or GitHub. On GitLab the token needs the `api` scope
+(`read_api` to look only); on GitHub a classic token with `repo`, `read:org`,
+`workflow` and `notifications`, or a fine-grained one. On Forgejo the token needs read access to repositories, organisations, issues and your
 user; opening a pull request, starting or re-running a workflow needs
 write access to repositories. With HTTPS remotes the same token is used for
 git, passed to git per command and never written into a clone.
@@ -82,12 +87,12 @@ run `xcodegen generate` to open it in Xcode.
 |---|---|
 | `App/` | the macOS app (Swift, SwiftUI with AppKit where it matters) |
 | `App/Core` | talks to the engine: JSON-RPC over the engine's stdin/stdout |
-| `App/Forge` | the Forgejo client, accounts, logs, Terraform plan and error parsing |
+| `App/Forge` | `ForgeService` and its three clients (Forgejo/Gitea, GitHub, GitLab; see `docs/backendy-serwerow.md`), accounts, logs, Terraform plan and error parsing |
 | `App/Model` | the app's state: `AppModel`, work on clones (`LocalWork`), what needs attention, notifications |
 | `App/Views` | the window, Home, the repository tabs, ⌘K, sheets, menu bar item |
 | `core/` | the engine, `gitnest-core` (Go): gitnest's `gitx`, `scan`, `config` and `state` packages plus `internal/rpc`, `internal/workflow` and the methods in `cmd/gitnest-core` |
 | `design/` | the logo and the app icon (SVG); `scripts/make-icon.sh` renders them |
-| `Tests/` | the app's tests; `LiveForgejoTests` run against a real server when `TEST_RUNNER_GNV_*` is set |
+| `Tests/` | the app's tests; `LiveForgejoTests`, `LiveProviderTests` (GitHub, GitLab) and `LiveJiraTests` run against real servers when `TEST_RUNNER_GNV_*` is set |
 
 Signing: `scripts/sign.sh` uses `~/.config/paksonite-gitnest-view/signing.p12`
 (or `SIGNING_P12_BASE64` in CI), a self-signed certificate, so the app keeps

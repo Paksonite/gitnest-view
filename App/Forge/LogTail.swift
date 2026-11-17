@@ -62,7 +62,11 @@ struct LogTail: Sendable {
            stamp.first?.isNumber == true, let clock = stamp.split(separator: "T").last {
             time = String(clock.prefix(8))
             line = String(line.dropFirst(min(stamp.count + 1, line.count)))
+            // GitLab 17+ puts the stream after the stamp: "00O text", "01E+more".
+            if let match = line.prefixMatch(of: /^[0-9a-f]{2}[OE][+ ]/) { line.removeSubrange(match.range) }
         }
+        // GitLab's collapsible sections: markers for its own page, noise here.
+        line.replace(/section_(start|end):\d+:[A-Za-z0-9_.\-\[\],=]*\r?(\u{1B}\[0K)?/, with: "")
         let (text, styles) = parseANSI(line)
         return LogLine(time: time, text: text, styles: styles)
     }
