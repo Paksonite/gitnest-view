@@ -279,6 +279,19 @@ func registerWork(srv *rpc.Server) {
 		return toFileDiff(p.File.Path, p.Staged, d), nil
 	})
 
+	// repo.tree: the files of the repository as git knows them, for the
+	// file tree (ignored files such as a .venv left out).
+	srv.Handle("repo.tree", func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := decodeRepo(raw, &p, &p.Path); err != nil {
+			return nil, err
+		}
+		files, err := gitx.TreeFiles(ctx, p.Path)
+		return map[string]any{"files": files}, err
+	})
+
 	// repo.linechanges: which lines of a file differ from the last commit.
 	srv.Handle("repo.linechanges", func(ctx context.Context, raw json.RawMessage) (any, error) {
 		var p struct {

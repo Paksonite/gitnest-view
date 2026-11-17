@@ -64,7 +64,7 @@ struct ChangesView: View {
                                            message: "Uncommitted lines are marked beside the line numbers; ±N in the file's header shows its diff.")
                             }
                         } else {
-                            WithFilePane(repo: repo) { diffPane }
+                            WithFilePane(repo: repo, closesOnLeave: false) { diffPane }
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -927,9 +927,9 @@ struct RepoFiles: View {
             }
         }
         .task(id: "\(clone.path)/\(clone.lastCommit)/\(clone.branch)/\(changed.map(\.path).joined(separator: "|"))") {
-            let root = clone.path
             let changedPaths = changed.filter { !$0.code.contains("D") }.map(\.path)
-            let fresh = await Task.detached(priority: .userInitiated) { FileTree.read(root, changed: changedPaths) }.value
+            guard let paths = await model.treeFiles(of: repo) else { return }
+            let fresh = await Task.detached(priority: .userInitiated) { FileTree.build(paths, changed: changedPaths) }.value
             // Folders that came to hold changes open by themselves, once.
             let new = fresh.foldersWithChanges.subtracting(opened)
             expanded.formUnion(new)
@@ -1003,8 +1003,7 @@ struct RepoFiles: View {
 
 /// A clone's folders and files, read from the disk.
 struct FileTree: Sendable {
-    static let limit = 20_000
-    private static let skipped: Set<String> = [".git", ".terraform", ".terragrunt-cache", "node_modules", ".DS_Store"]
+    static let limit = 50_000
 
     final class Node: @unchecked Sendable {
         let name: String
@@ -1033,42 +1032,40 @@ struct FileTree: Sendable {
     let cut: Bool
     let foldersWithChanges: Set<String>
 
-    /// Walks the clone (skipping .git and caches); changed paths that are
-    /// not on the disk yet are not invented.
-    static func read(_ base: String, changed: [String]) -> FileTree {
+    /// The tree of a list of paths ("a/b/c.yml"), folders made from them.
+    static func build(_ paths: [String], changed: [String]) -> FileTree {
         let root = Node(name: "", path: "", folder: true)
         var folders: [String: Node] = ["": root]
-        var count = 0
-        var cut = false
-        let fm = FileManager.default
-        func walk(_ dir: String, into node: Node) {
-            guard let names = try? fm.contentsOfDirectory(atPath: base + (dir.isEmpty ? "" : "/" + dir)) else { return }
-            for name in names.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) where !skipped.contains(name) {
-                if count >= limit { cut = true; return }
-                let path = dir.isEmpty ? name : dir + "/" + name
-                var isDir: ObjCBool = false
-                guard fm.fileExists(atPath: base + "/" + path, isDirectory: &isDir) else { continue }
-                let child = Node(name: name, path: path, folder: isDir.boolValue)
-                node.children.append(child)
-                if isDir.boolValue {
-                    folders[path] = child
-                    walk(path, into: child)
+        let cut = paths.count > limit
+        for path in paths.prefix(limit) {
+            let parts = path.split(separator: "/").map(String.init)
+            var parent = root
+            var prefix = ""
+            for part in parts.dropLast() {
+                prefix = prefix.isEmpty ? part : prefix + "/" + part
+                if let known = folders[prefix] {
+                    parent = known
                 } else {
-                    count += 1
+                    let folder = Node(name: part, path: prefix, folder: true)
+                    parent.children.append(folder)
+                    folders[prefix] = folder
+                    parent = folder
                 }
             }
-            // Folders first, as Finder and editors list them.
-            node.children.sort { $0.folder != $1.folder ? $0.folder : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            parent.children.append(Node(name: parts.last ?? path, path: path, folder: false))
         }
-        walk("", into: root)
+        // Folders first, as Finder and editors list them.
+        func order(_ node: Node) {
+            node.children.sort { $0.folder != $1.folder ? $0.folder : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            node.children.filter(\.folder).forEach(order)
+        }
+        order(root)
         var withChanges: Set<String> = []
         for path in changed {
-            var parts = path.split(separator: "/").map(String.init)
-            parts.removeLast()
             var prefix = ""
             root.changes += 1
-            for part in parts {
-                prefix = prefix.isEmpty ? part : prefix + "/" + part
+            for part in path.split(separator: "/").dropLast() {
+                prefix = prefix.isEmpty ? String(part) : prefix + "/" + part
                 folders[prefix]?.changes += 1
                 withChanges.insert(prefix)
             }

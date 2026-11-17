@@ -270,15 +270,9 @@ final class CollabTests: XCTestCase {
 
 final class FileTreeTests: XCTestCase {
     func testFoldersFirstChangesCountedAndFilter() throws {
-        let root = FileManager.default.temporaryDirectory.appending(path: "gnv-tree-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
-        for path in ["b.txt", "roles/web/tasks/main.yml", "roles/web/files/x.conf", "roles/db/tasks/main.yml", ".git/HEAD", "a/z.md"] {
-            let url = root.appending(path: path)
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try Data("x".utf8).write(to: url)
-        }
-        let tree = FileTree.read(root.path, changed: ["roles/web/tasks/main.yml", "b.txt"])
-        // Closed: the top level only, folders first, .git left out.
+        let tree = FileTree.build(["b.txt", "roles/web/tasks/main.yml", "roles/web/files/x.conf", "roles/db/tasks/main.yml", "a/z.md"],
+                                  changed: ["roles/web/tasks/main.yml", "b.txt"])
+        // Closed: the top level only, folders first.
         XCTAssertEqual(tree.rows(expanded: [], query: "").map(\.path), ["a", "roles", "b.txt"])
         XCTAssertEqual(tree.foldersWithChanges, ["roles", "roles/web", "roles/web/tasks"])
         let open = tree.rows(expanded: tree.foldersWithChanges, query: "")
