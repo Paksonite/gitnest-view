@@ -138,8 +138,8 @@ struct GitLabClient: ForgeService {
         pull["merged"] = state == "merged"
         pull["mergeable"] = mergeable
         pull["user"] = userJSON(item["author"])
-        pull["requested_reviewers"] = (item["reviewers"] as? [Any] ?? []).map(userJSON)
-        pull["assignees"] = (item["assignees"] as? [Any] ?? []).map(userJSON)
+        pull["requested_reviewers"] = people(item["reviewers"])
+        pull["assignees"] = people(item["assignees"])
         pull["html_url"] = item["web_url"] ?? ""
         let target: Any = item["target_branch"] ?? ""
         pull["base"] = ["ref": target, "sha": refs?["base_sha"] ?? "", "label": target] as [String: Any]
@@ -622,6 +622,15 @@ struct GitLabClient: ForgeService {
     static func userJSON(_ object: Any?) -> Any {
         guard let user = object as? [String: Any] else { return NSNull() }
         return ["id": user["id"] ?? 0, "login": user["username"] ?? "", "full_name": user["name"] ?? NSNull(), "avatar_url": user["avatar_url"] ?? NSNull()]
+    }
+
+    /// A list of GitLab users as Forgejo users, whatever array type it came in.
+    static func people(_ object: Any?) -> [Any] {
+        let list: [Any] = (object as? [[String: Any]]).map { $0.map { $0 as Any } } ?? (object as? NSArray).map { Array($0) } ?? []
+        return list.compactMap { entry -> Any? in
+            let user = userJSON(entry)
+            return user is NSNull ? nil : user
+        }
     }
 
     static func user(_ object: Any?) -> ForgeUser? {
