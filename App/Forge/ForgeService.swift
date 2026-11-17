@@ -136,10 +136,19 @@ protocol ForgeService: Sendable {
 
     /// The repository's size in KiB when a listing left it out (GitLab).
     func repositorySize(_ repo: RepoSlug) async -> Int?
+
+    /// Whether each step's log can be read on its own while the job runs
+    /// (Forgejo). Otherwise the job's whole log is read and split by the
+    /// steps' start times.
+    var hasStepLogs: Bool { get }
+    /// Whether a running job's log can be read before it ends (not on GitHub).
+    var hasLiveLogs: Bool { get }
 }
 
 extension ForgeService {
     func repositorySize(_ repo: RepoSlug) async -> Int? { nil }
+    var hasStepLogs: Bool { kind == .forgejo }
+    var hasLiveLogs: Bool { kind != .github }
 
     func pullRequests(_ repo: RepoSlug, state: String = "open", limit: Int = 50) async throws -> [PullRequest] {
         try await listPulls(repo, state: state, limit: limit)

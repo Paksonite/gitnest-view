@@ -42,7 +42,7 @@ struct LogPane: View {
                             } else {
                                 ForEach(follower.steps) { step in
                                     StepSection(
-                                        log: step, lines: shown(step.lines),
+                                        log: step, lines: shown(step.lines), logLater: follower.logAfterJob && follower.live,
                                         open: chosen[step.id] ?? opensByItself(step),
                                         toggle: { chosen[step.id] = !(chosen[step.id] ?? opensByItself(step)) }
                                     )
@@ -153,7 +153,8 @@ struct LogPane: View {
         if steps.contains(where: { $0.step.state == .failure }) { return false }
         let withTerraform = steps.filter { TerraformPlan.parse($0.lines) != nil }
         if !withTerraform.isEmpty { return withTerraform.last?.id == log.id }
-        let work = steps.filter { !["Set up job", "Complete job"].contains($0.step.name) && !$0.lines.isEmpty }
+        // The runner's own steps ("Post Run actions/checkout") did no work of the job's.
+        let work = steps.filter { !["Set up job", "Complete job"].contains($0.step.name) && !$0.step.name.hasPrefix("Post ") && !$0.lines.isEmpty }
         return work.last?.id == log.id
     }
 }
@@ -178,6 +179,8 @@ private struct LogMetrics: PreferenceKey {
 private struct StepSection: View {
     let log: StepLog
     let lines: [LogLine]
+    /// The server publishes the log only after the job (GitHub).
+    var logLater = false
     let open: Bool
     let toggle: () -> Void
 
@@ -211,7 +214,8 @@ private struct StepSection: View {
             .hoverBackground(radius: 0)
             if open {
                 if lines.isEmpty {
-                    Text(log.step.state.isFinished ? "No output." : "Waiting for output…")
+                    Text(logLater ? "GitHub publishes the log when the job has finished. Open in Browser to watch it live."
+                         : log.step.state.isFinished ? "No output." : "Waiting for output…")
                         .font(.system(size: 11.5))
                         .foregroundStyle(Theme.tertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
