@@ -17,6 +17,8 @@ struct WithFilePane<Content: View>: View {
     @Environment(AppModel.self) private var model
     /// The pane shows only files of this repository; nil shows any.
     var repo: ForgeRepo? = nil
+    /// Leaving the view closes the file; Changes keeps it for its Files mode.
+    var closesOnLeave = true
     @ViewBuilder var content: Content
 
     private var target: FileTarget? {
@@ -38,7 +40,7 @@ struct WithFilePane<Content: View>: View {
             .clipped()
             .animation(Motion.panel, value: target != nil)
         }
-        .onDisappear { model.fileTarget = nil }
+        .onDisappear { if closesOnLeave { model.fileTarget = nil } }
     }
 }
 

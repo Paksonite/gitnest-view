@@ -451,6 +451,14 @@ extension AppModel {
 // MARK: - Uncommitted lines of a file
 
 extension AppModel {
+    /// The clone's files as git knows them (ignored ones left out).
+    func treeFiles(of repo: ForgeRepo) async -> [String]? {
+        guard let clone = clone(of: repo) else { return nil }
+        struct Result: Decodable { var files: [String] }
+        let result: Result? = try? await core.call("repo.tree", PathParams(path: clone.path))
+        return result?.files
+    }
+
     func lineChanges(of file: String, in repo: ForgeRepo) async -> LineChanges? {
         guard let clone = clone(of: repo) else { return nil }
         struct Params: Encodable, Sendable { var path: String; var file: String }

@@ -569,3 +569,21 @@ func TestLineChangesAgainstHead(t *testing.T) {
 		t.Errorf("new.txt is untracked: %+v", c)
 	}
 }
+
+func TestTreeLeavesIgnoredFilesOut(t *testing.T) {
+	dir, _ := newRepo(t)
+	write(t, dir, ".gitignore", ".venv/\n")
+	if err := os.MkdirAll(filepath.Join(dir, ".venv", "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, ".venv/lib/site.py", "x\n")
+	if err := os.MkdirAll(filepath.Join(dir, "ansible", "roles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "ansible/roles/main.yml", "x\n")
+	var tree struct{ Files []string }
+	must(t, "repo.tree", map[string]any{"path": dir}, &tree)
+	if got := strings.Join(tree.Files, ","); got != ".gitignore,a.txt,ansible/roles/main.yml" {
+		t.Errorf("tree: %s", got)
+	}
+}

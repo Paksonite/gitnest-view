@@ -1532,3 +1532,26 @@ func IncomingCommits(ctx context.Context, dir, branch, upstream string, n int) [
 	}
 	return list
 }
+
+// TreeFiles lists the repository's files as git sees them: every tracked
+// file and every new one, without what .gitignore leaves out (virtualenvs,
+// build output), sorted by path.
+func TreeFiles(ctx context.Context, dir string) ([]string, error) {
+	out, err := run(ctx, kRead, dir, nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate")
+	if err != nil {
+		// git before 2.31 has no --deduplicate.
+		if out, err = run(ctx, kRead, dir, nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard"); err != nil {
+			return nil, err
+		}
+	}
+	seen := map[string]bool{}
+	var files []string
+	for _, f := range strings.Split(out, "\x00") {
+		if f != "" && !seen[f] {
+			seen[f] = true
+			files = append(files, f)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
+}

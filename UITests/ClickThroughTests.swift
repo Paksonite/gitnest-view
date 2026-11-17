@@ -135,6 +135,38 @@ final class ClickThroughTests: XCTestCase {
         shot("34-ticket-logged")
     }
 
+    /// The sidebar after a pull and a change of repository: one row lit
+    /// (the selected one), and the pulled one without its ↓. Needs a clone
+    /// of GNV_UI_BEHIND_REPO that is behind its upstream, and GNV_UI_OTHER_REPO.
+    func testSidebarAfterPullAndSwitch() throws {
+        // Steps the caller photographs from outside (screenshots fail on some Macs).
+        func mark(_ step: String) {
+            try? step.write(toFile: (env["GNV_UI_TMP"] ?? NSTemporaryDirectory()) + "/step", atomically: true, encoding: .utf8)
+            sleep(3)
+        }
+        guard let behind = env["GNV_UI_BEHIND_REPO"], let other = env["GNV_UI_OTHER_REPO"] else { throw XCTSkip("GNV_UI_BEHIND_REPO, GNV_UI_OTHER_REPO") }
+        button(behind, timeout: 25).click()
+        sleep(2)
+        mark("50")
+        let pull = app.buttons.matching(NSPredicate(format: "label MATCHES 'Pull [0-9]+'")).firstMatch
+        XCTAssertTrue(pull.waitForExistence(timeout: 15), "no Pull button for a clone that is behind")
+        pull.click()
+        _ = element("Pulled", timeout: 30)
+        sleep(1)
+        mark("51")
+        button(other).click()
+        sleep(1)
+        // The pointer away from the list, over the content.
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6)).hover()
+        sleep(2)
+        mark("52")
+        button(behind).hover()
+        sleep(1)
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6)).hover()
+        sleep(1)
+        mark("53")
+    }
+
     func testMenuBarQuickAction() throws {
         _ = button("Home", timeout: 25)
         _ = element("Waiting for your review", timeout: 20)

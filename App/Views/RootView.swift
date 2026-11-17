@@ -248,18 +248,16 @@ struct SidebarView: View {
             ScrollView {
                 LazyVStack(spacing: 1) {
                     let prefixes = RepoName.sharedPrefixes(model.repos.map(\.name))
-                    let groups = model.sidebarGroups(reasons)
-                    let pinned = model.pinnedRepos
-                    if !pinned.isEmpty {
-                        groupHeader("Pinned", pinned.count)
-                        ForEach(pinned) { repo in row(repo, prefixes, reasons, quiet: false) }
+                    // One list for every group: a repository that moves to
+                    // another group (pulled, so no longer behind) stays the
+                    // same row. In separate lists the lazy stack kept the old
+                    // row drawn, lit and with its old marks.
+                    ForEach(sidebarItems(reasons)) { item in
+                        switch item {
+                        case .header(let title, let count): groupHeader(title, count)
+                        case .repo(let repo, let quiet): row(repo, prefixes, reasons, quiet: quiet)
+                        }
                     }
-                    if let urgent = groups.attention, !urgent.isEmpty {
-                        groupHeader("Needs attention", urgent.count)
-                        ForEach(urgent) { repo in row(repo, prefixes, reasons, quiet: false) }
-                        groupHeader("Everything else", groups.rest.count)
-                    }
-                    ForEach(groups.rest) { repo in row(repo, prefixes, reasons, quiet: groups.attention != nil) }
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
@@ -314,6 +312,35 @@ struct SidebarView: View {
             .frame(width: 18, height: 18)
             .contentShape(Rectangle())
             .help(title)
+    }
+
+    private enum SidebarItem: Identifiable {
+        case header(String, Int)
+        case repo(ForgeRepo, quiet: Bool)
+
+        var id: String {
+            switch self {
+            case .header(let title, _): "header:" + title
+            case .repo(let repo, _): "repo:\(repo.id)"
+            }
+        }
+    }
+
+    private func sidebarItems(_ reasons: [ForgeRepo.ID: [AttentionReason]]) -> [SidebarItem] {
+        let groups = model.sidebarGroups(reasons)
+        let pinned = model.pinnedRepos
+        var items: [SidebarItem] = []
+        if !pinned.isEmpty {
+            items.append(.header("Pinned", pinned.count))
+            items += pinned.map { .repo($0, quiet: false) }
+        }
+        if let urgent = groups.attention, !urgent.isEmpty {
+            items.append(.header("Needs attention", urgent.count))
+            items += urgent.map { .repo($0, quiet: false) }
+            items.append(.header("Everything else", groups.rest.count))
+        }
+        items += groups.rest.map { .repo($0, quiet: groups.attention != nil) }
+        return items
     }
 
     private func groupHeader(_ title: String, _ count: Int) -> some View {
