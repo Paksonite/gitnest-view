@@ -245,7 +245,7 @@ final class LiveForgejoTests: XCTestCase {
         XCTAssertEqual(draft.commits.count, 1)
         try await model.createRelease(repo, head: branch, base: base, title: draft.title, body: draft.body)
         let number = try XCTUnwrap(model.pendingPull)
-        let client = try XCTUnwrap(model.client(for: slug.host))
+        let client = try XCTUnwrap(model.client(for: slug.host) as? ForgejoClient)
         let pull = try await client.pullRequest(slug, number: number)
         XCTAssertEqual(pull.head.ref, branch)
 
@@ -294,7 +294,7 @@ final class LiveForgejoTests: XCTestCase {
 
         let merged = await model.merge(pull, style: "squash", deleteBranch: true, in: repo)
         XCTAssertTrue(merged, model.toasts.map(\.text).joined(separator: "; "))
-        let client = try XCTUnwrap(model.client(for: slug.host))
+        let client = try XCTUnwrap(model.client(for: slug.host) as? ForgejoClient)
         let after = try await client.pullRequest(labSlug, number: number)
         XCTAssertEqual(after.merged, true)
     }
@@ -338,7 +338,7 @@ final class LiveForgejoTests: XCTestCase {
         let work = try XCTUnwrap(model.workInProgress.first { $0.branch == branch })
         XCTAssertEqual(work.items.count, 2)
         await model.pushAll(work)
-        let client = try XCTUnwrap(model.client(for: slug.host))
+        let client = try XCTUnwrap(model.client(for: slug.host) as? ForgejoClient)
         for repo in chosen {
             let clone = try XCTUnwrap(model.clone(of: repo))
             XCTAssertTrue(clone.hasUpstream, model.toasts.map(\.text).joined(separator: "; "))
@@ -419,7 +419,7 @@ final class LiveForgejoTests: XCTestCase {
         let drift = try XCTUnwrap(model.workflows[try XCTUnwrap(model.slug(repo)).key]?.first { $0.file == "drift-detection.yaml" })
         XCTAssertEqual(drift.info?.inputs.map(\.name), ["environment", "refresh_only", "note"])
 
-        let client = try XCTUnwrap(model.client(for: slug.host))
+        let client = try XCTUnwrap(model.client(for: slug.host) as? ForgejoClient)
         let labSlug = try XCTUnwrap(model.slug(repo))
         let before = try await client.runs(labSlug, limit: 1).first?.id ?? 0
         try await model.dispatch(drift, ref: "main", inputs: ["environment": "test", "refresh_only": "false", "note": "from a test"], in: repo)

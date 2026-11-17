@@ -10,7 +10,7 @@ struct HostNotification: Identifiable, Hashable, Sendable {
 // What the user does on a pull request besides reading it: talk, ask for
 // reviews, label, keep its branch current, edit, close.
 extension AppModel {
-    private func target(_ repo: ForgeRepo) -> (RepoSlug, ForgejoClient)? {
+    private func target(_ repo: ForgeRepo) -> (RepoSlug, any ForgeService)? {
         guard let slug = slug(repo), let client = client(for: slug.host) else { return nil }
         return (slug, client)
     }
@@ -18,7 +18,7 @@ extension AppModel {
     /// Runs a change on the server, says what happened, and reads the pull
     /// request again. Returns false when the server refused.
     @discardableResult
-    private func change(_ repo: ForgeRepo, _ pull: PullRequest, done: String, _ work: (RepoSlug, ForgejoClient) async throws -> Void) async -> Bool {
+    private func change(_ repo: ForgeRepo, _ pull: PullRequest, done: String, _ work: (RepoSlug, any ForgeService) async throws -> Void) async -> Bool {
         guard let (slug, client) = target(repo) else { return false }
         do {
             try await work(slug, client)

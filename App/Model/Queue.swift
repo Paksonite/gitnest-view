@@ -178,8 +178,9 @@ extension AppModel {
     }
 
     static func slug(host: String, fullName: String?) -> RepoSlug? {
-        guard let parts = fullName?.split(separator: "/", maxSplits: 1).map(String.init), parts.count == 2 else { return nil }
-        return RepoSlug(host: host, owner: parts[0], name: parts[1])
+        // The last part is the name; a GitLab subgroup keeps its path as the owner.
+        guard let fullName, let cut = fullName.lastIndex(of: "/"), cut != fullName.startIndex, cut != fullName.index(before: fullName.endIndex) else { return nil }
+        return RepoSlug(host: host, owner: String(fullName[..<cut]), name: String(fullName[fullName.index(after: cut)...]))
     }
 }
 

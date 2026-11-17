@@ -29,7 +29,7 @@ final class LogFollower {
 
     private var task: Task<Void, Never>?
 
-    func follow(_ target: LogTarget, client: ForgejoClient) {
+    func follow(_ target: LogTarget, client: any ForgeService) {
         stop()
         steps = []
         whole = []

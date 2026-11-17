@@ -429,9 +429,15 @@ final class AppModel {
     }
 
     /// Checks the token against the server and remembers the account.
-    func connect(host input: String, token: String) async throws {
+    /// Without a kind, the server is asked what it is.
+    func connect(host input: String, token: String, kind wanted: ForgeKind? = nil) async throws {
         let host = ForgeAccount.normalize(input)
-        let client = ForgejoClient(host: host, token: token, session: session)
+        var found = wanted
+        if found == nil { found = try await detectKind(host: host) }
+        guard let kind = found else {
+            throw ForgeError.rejected("\(host) does not answer like Forgejo, Gitea, GitHub or GitLab. Check the address, or pick the kind of server.")
+        }
+        let client = Self.makeClient(kind, host: host, token: token, session: session)
         let user = try await client.currentUser()
         let version = try? await client.version()
         try tokens.setToken(token, for: host)
@@ -439,7 +445,7 @@ final class AppModel {
         writeAccess[host] = nil
         let ssh = accounts.first { $0.host == host }?.cloneWithSSH
         accounts.removeAll { $0.host == host }
-        accounts.append(ForgeAccount(host: host, login: user.login, serverVersion: version, cloneWithSSH: ssh))
+        accounts.append(ForgeAccount(host: host, login: user.login, serverVersion: version, cloneWithSSH: ssh, kind: kind))
         accounts.sort { $0.host < $1.host }
         saveAccounts()
         await reload()
@@ -493,12 +499,51 @@ final class AppModel {
         }
     }
 
-    func client(for host: String) -> ForgejoClient? {
-        guard accounts.contains(where: { $0.host == host }) else { return nil }
+    func client(for host: String) -> (any ForgeService)? {
+        guard let account = accounts.first(where: { $0.host == host }) else { return nil }
         // Still waiting for the Keychain: whoever asks now is asked again by the first reload.
         if tokensLoading, tokenCache[host] == nil { return nil }
         if tokenCache[host] == nil, let token = tokens.token(for: host) { tokenCache[host] = token }
-        return ForgejoClient(host: host, token: tokenCache[host], session: session)
+        return Self.makeClient(account.forgeKind, host: host, token: tokenCache[host], session: session)
+    }
+
+    func kind(of host: String?) -> ForgeKind {
+        accounts.first { $0.host == host }?.forgeKind ?? .forgejo
+    }
+
+    static func makeClient(_ kind: ForgeKind, host: String, token: String?, session: URLSession) -> any ForgeService {
+        switch kind {
+        case .forgejo: ForgejoClient(host: host, token: token, session: session)
+        case .github: GitHubClient(host: host, token: token, session: session)
+        case .gitlab: GitLabClient(host: host, token: token, session: session)
+        }
+    }
+
+    /// What a server is, from the questions only one kind answers:
+    /// /api/v1/version (Forgejo, Gitea), /api/v4/version (GitLab, which asks
+    /// for a token), /api/v3/meta (GitHub Enterprise). Nil when none fits.
+    func detectKind(host: String) async throws -> ForgeKind? {
+        if let known = ForgeKind.guess(host: host) { return known }
+        func status(_ path: String) async -> (Int, Data) {
+            guard let url = URL(string: "https://\(host)/\(path)") else { return (0, Data()) }
+            var request = URLRequest(url: url, timeoutInterval: 15)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            do {
+                let (data, response) = try await session.data(for: request, delegate: AuthGuard.shared)
+                return ((response as? HTTPURLResponse)?.statusCode ?? 0, data)
+            } catch {
+                return (-1, Data())
+            }
+        }
+        async let forgejo = status("api/v1/version")
+        async let gitlab = status("api/v4/version")
+        async let github = status("api/v3/meta")
+        let (f, l, h) = await (forgejo, gitlab, github)
+        if f.0 == 200, (try? JSONSerialization.jsonObject(with: f.1) as? [String: Any])?["version"] != nil { return .forgejo }
+        if [200, 401].contains(l.0), l.1.range(of: Data("401 Unauthorized".utf8)) != nil || (try? JSONSerialization.jsonObject(with: l.1) as? [String: Any])?["version"] != nil { return .gitlab }
+        if h.0 == 200, (try? JSONSerialization.jsonObject(with: h.1) as? [String: Any])?["installed_version"] != nil { return .github }
+        if f.0 == -1, l.0 == -1, h.0 == -1 { throw ForgeError.rejected("\(host) cannot be reached. Check the address, the VPN and the network.") }
+        return nil
     }
 
     // MARK: - Workspaces and repositories
@@ -562,7 +607,11 @@ final class AppModel {
                 // Own repositories and the ones shared with the account,
                 // without those of organisations (they have their own entry).
                 let orgs = Set(workspaces.filter { !$0.personal && $0.host == workspace.host }.map { $0.owner.lowercased() })
-                fresh = try await client.userRepositories().filter { !orgs.contains($0.owner.login.lowercased()) }
+                // A GitLab subgroup ("ops/aws") belongs to its top-level group's workspace.
+                fresh = try await client.userRepositories().filter { repo in
+                    let owner = repo.owner.login.lowercased()
+                    return !orgs.contains(owner) && !orgs.contains(String(owner.split(separator: "/").first ?? ""))
+                }
             } else {
                 fresh = try await client.repositories(org: workspace.owner)
             }
@@ -699,7 +748,7 @@ final class AppModel {
         guard url.lowercased().hasPrefix("https://"), let account = accounts.first(where: { $0.host == host }),
               let token = client(for: host)?.token, !token.isEmpty
         else { return nil }
-        return GitAuth(host: host, user: account.login ?? "token", token: token)
+        return GitAuth(host: host, user: account.forgeKind.gitUser(login: account.login), token: token)
     }
 
     func clone(_ repo: ForgeRepo) async {
@@ -883,7 +932,7 @@ final class AppModel {
         return pulls.first { $0.state == "open" } ?? pulls.first { $0.merged == true }
     }
 
-    private func readForge(_ repo: ForgeRepo, slug: RepoSlug, client: ForgejoClient, detailed: Bool) async {
+    private func readForge(_ repo: ForgeRepo, slug: RepoSlug, client: any ForgeService, detailed: Bool) async {
         var state = forge[slug.key] ?? RepoForge()
         do {
             if detailed {
@@ -992,7 +1041,7 @@ final class AppModel {
 
     /// Everything is asked for at once and shown as it arrives: the
     /// pipelines first, they are what the eye looks for.
-    private func readExtras(_ pull: PullRequest, slug: RepoSlug, client: ForgejoClient, key: String) async {
+    private func readExtras(_ pull: PullRequest, slug: RepoSlug, client: any ForgeService, key: String) async {
         let merged = pull.merged == true ? pull.mergeCommitSHA.flatMap { $0.isEmpty || $0 == pull.head.sha ? nil : $0 } : nil
         // The repository's own refresh has just read these for an open pull request.
         let checked = extrasChecked[key].map { Date.now.timeIntervalSince($0) < 5 } ?? false
@@ -1097,7 +1146,7 @@ final class AppModel {
 
     /// The Terraform summary in the logs of the finished jobs, if any. A
     /// finished job's log never changes, so each is read once.
-    private func terraform(in jobs: [WorkflowJob], slug: RepoSlug, client: ForgejoClient) async -> TerraformPlan? {
+    private func terraform(in jobs: [WorkflowJob], slug: RepoSlug, client: any ForgeService) async -> TerraformPlan? {
         let ordered = jobs.filter(isKey) + jobs.filter { !isKey($0) }
         for job in ordered where job.state.isFinished && job.hasStarted {
             let cacheKey = "\(slug.key)#job\(job.id)"
@@ -1119,7 +1168,7 @@ final class AppModel {
 
     /// The error of the first failed key job (else any failed job) whose log
     /// has one. Read once per job and kept.
-    private func terraformError(in jobs: [WorkflowJob], slug: RepoSlug, client: ForgejoClient) async -> [String]? {
+    private func terraformError(in jobs: [WorkflowJob], slug: RepoSlug, client: any ForgeService) async -> [String]? {
         let failed = jobs.filter { $0.state == .failure && $0.hasStarted }
         for job in failed.filter(isKey) + failed.filter({ !isKey($0) }) {
             let cacheKey = "\(slug.key)#err\(job.id)"
@@ -1159,7 +1208,13 @@ final class AppModel {
     }
 
     /// The Actions job a check points at.
-    private func job(for check: CommitStatus, slug: RepoSlug, client: ForgejoClient) async -> (id: Int, runID: Int, web: String?)? {
+    private func job(for check: CommitStatus, slug: RepoSlug, client: any ForgeService) async -> (id: Int, runID: Int, web: String?)? {
+        // GitHub and GitLab name the job themselves.
+        if let id = check.jobID {
+            var runID = check.runID
+            if runID == nil { runID = (try? await client.job(slug, id: id))?.runID }
+            return runID.map { (id, $0, check.targetURL) }
+        }
         guard let reference = check.jobReference else { return nil }
         func matching(_ runs: [WorkflowRun]) -> WorkflowRun? {
             runs.first { URLComponents(string: $0.htmlURL ?? "")?.path == reference.runPath }
@@ -1235,7 +1290,10 @@ final class AppModel {
         var list: [Workflow] = []
         for file in files {
             var workflow = known.removeValue(forKey: file.path) ?? Workflow(file: file.name, path: file.path)
-            if workflow.info == nil, let text = try? await client.fileText(slug, path: file.path) {
+            if workflow.info == nil, client.kind == .gitlab {
+                // One pipeline file; any pipeline can be started by hand, with variables.
+                workflow.info = WorkflowInfo(name: "GitLab CI/CD", dispatch: true, inputs: [], events: ["push", "merge_request", "web"])
+            } else if workflow.info == nil, let text = try? await client.fileText(slug, path: file.path) {
                 workflow.info = try? await core.call("workflow.parse", WorkflowParseParams(content: text))
             }
             list.append(workflow)
@@ -1302,7 +1360,7 @@ final class AppModel {
     /// and a description to start from. A release (develop into the default
     /// branch) is titled after the tickets; a feature after its first commit.
     func releaseDraft(_ repo: ForgeRepo, head: String, base: String, release: Bool = true) async throws -> ReleaseDraft {
-        guard let slug = slug(repo), let client = client(for: slug.host) else { throw ForgejoClient.ForgeError.notAnswer }
+        guard let slug = slug(repo), let client = client(for: slug.host) else { throw ForgeError.notAnswer }
         let commits = try await client.compare(slug, base: base, head: head)
         let tickets = Self.tickets(in: commits.map(\.commit.message) + (release ? [] : [head]))
         let open = (try? await client.pullRequests(slug, state: "open")) ?? []

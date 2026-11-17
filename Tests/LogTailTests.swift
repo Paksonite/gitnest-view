@@ -49,6 +49,16 @@ final class LogTailTests: XCTestCase {
         XCTAssertTrue(LogTail.parse("2026-11-10T18:33:15.3871677Z ❌  Failure - Main Build").isFailure)
     }
 
+    func testGitLabTraceLines() {
+        let plain = LogTail.parse("2026-11-17T07:56:08.719Z 00O Plan: 1 to add, 0 to change, 0 to destroy.")
+        XCTAssertEqual(plain.time, "07:56:08")
+        XCTAssertEqual(plain.text, "Plan: 1 to add, 0 to change, 0 to destroy.")
+        XCTAssertEqual(LogTail.parse("2026-11-17T07:56:08.219Z 00O+\u{1B}[0K\u{1B}[36;1mCleaning up\u{1B}[0;m").text, "Cleaning up")
+        XCTAssertEqual(LogTail.parse("2026-11-17T07:56:08.718Z 00O section_end:1794902168:cleanup_file_variables\u{1B}[0K").text, "")
+        XCTAssertEqual(LogTail.parse("2026-11-17T07:56:08.718Z 01E error: boom").text, "error: boom")
+        XCTAssertEqual(LogTail.parse("2026-11-10T18:33:15.5251032Z 00Ops, Forgejo text").text, "00Ops, Forgejo text", "Forgejo's lines keep their words")
+    }
+
     func testStripsColours() {
         XCTAssertEqual(LogTail.stripANSI("\u{1B}[1m\u{1B}[32mApply complete!\u{1B}[0m Resources: 1 added"), "Apply complete! Resources: 1 added")
         XCTAssertEqual(LogTail.stripANSI("no escapes"), "no escapes")

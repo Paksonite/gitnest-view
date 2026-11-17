@@ -1,18 +1,28 @@
 import AppKit
 import SwiftUI
 
-/// The form that connects a Forgejo server; used in Settings and on first launch.
+/// The form that connects a server (Forgejo, Gitea, GitLab, GitHub); used in Settings.
 struct ConnectForm: View {
     @Environment(AppModel.self) private var model
     @State private var host = ""
     @State private var token = ""
+    @State private var kind: ForgeKind?
     @State private var working = false
     @State private var error: String?
 
     var body: some View {
-        TextField("Server", text: $host, prompt: Text("forgejo.example.com"))
+        KindPicker(kind: $kind, host: $host)
+        TextField("Server", text: $host, prompt: Text(kind == .github ? "github.com" : "git.example.com"))
             .autocorrectionDisabled()
         SecureField("Access token", text: $token)
+        if let kind {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(kind.scopeHint).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let url = kind.tokenPage(host: ForgeAccount.normalize(host.isEmpty && kind == .github ? "github.com" : host)), !host.isEmpty || kind == .github {
+                    Button("Create Token…") { openExternal(url) }.buttonStyle(.link).font(.system(size: 11))
+                }
+            }
+        }
         HStack {
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.callout)
@@ -30,7 +40,7 @@ struct ConnectForm: View {
         error = nil
         Task {
             do {
-                try await model.connect(host: host, token: token)
+                try await model.connect(host: host, token: token, kind: kind)
                 host = ""
                 token = ""
             } catch {

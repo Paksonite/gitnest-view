@@ -151,9 +151,18 @@ func TestBranchesStashesAndPush(t *testing.T) {
 		t.Error("a name with a space must be refused")
 	}
 	must(t, "repo.branch.create", map[string]any{"path": dir, "name": "feat/x"}, nil)
+	var fresh struct{ Count int }
+	must(t, "repo.newcommits", map[string]any{"path": dir}, &fresh)
+	if fresh.Count != 0 {
+		t.Errorf("a new branch has %d new commits, want 0", fresh.Count)
+	}
 	write(t, dir, "b.txt", "b\n")
 	git(t, dir, "add", "b.txt")
 	git(t, dir, "commit", "-q", "-m", "b")
+	must(t, "repo.newcommits", map[string]any{"path": dir}, &fresh)
+	if fresh.Count != 1 {
+		t.Errorf("after a commit: %d new commits, want 1", fresh.Count)
+	}
 	must(t, "repo.push", map[string]any{"path": dir}, nil)
 	if got := git(t, origin, "branch", "--list", "feat/x"); !strings.Contains(got, "feat/x") {
 		t.Errorf("push did not create the branch: %q", got)

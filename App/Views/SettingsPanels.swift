@@ -99,7 +99,7 @@ private struct ServerSettings: View {
             ForEach(model.accounts) { account in
                 Section {
                     LabeledContent("Signed in as") {
-                        Text([account.login, account.serverVersion.map { "Forgejo \($0)" }].compactMap { $0 }.joined(separator: " · "))
+                        Text([account.login, account.serverVersion.map { ServerVersion.text($0, kind: account.forgeKind) } ?? account.forgeKind.title].compactMap { $0 }.joined(separator: " · "))
                     }
                     Picker("Clone with", selection: Binding(get: { account.cloneWithSSH == true }, set: { model.setCloneWithSSH($0, for: account) })) {
                         Text("HTTPS + token").tag(false)
@@ -123,7 +123,7 @@ private struct ServerSettings: View {
             } header: {
                 Text("Connect another server")
             } footer: {
-                footnote("Create the token on the server under Settings → Applications with read and write access to repositories, issues and notifications, and read access to organisations and your user. It is kept in the Keychain.")
+                footnote("Forgejo and Gitea: Settings → Applications. GitLab: Preferences → Access tokens, scope api. GitHub: Settings → Developer settings → Tokens. The kind is found out from the address unless you pick it. The token is kept in the Keychain.")
             }
         }
     }
@@ -182,7 +182,7 @@ private struct NotificationSettings: View {
                        isOn: Binding(get: { model.notifyMyPulls }, set: { model.notifyMyPulls = $0 }))
                 Toggle("A pipeline of my pull request, or a scheduled one, fails", isOn: Binding(get: { model.notifyFailures }, set: { model.notifyFailures = $0 }))
             } header: {
-                Text("Forgejo")
+                Text("Git servers")
             } footer: {
                 footnote("Checked every two minutes, also while GitNest View is in the background. Every notification names its server. A server can be silenced on its own under Servers.")
             }

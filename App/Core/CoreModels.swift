@@ -278,6 +278,10 @@ struct MessageResult: Decodable, Sendable {
     var message: String
 }
 
+struct CountResult: Decodable, Sendable {
+    var count: Int
+}
+
 struct ActivityCommit: Decodable, Hashable, Sendable {
     var path: String
     var unix: Int

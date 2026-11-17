@@ -179,10 +179,16 @@ struct CommitStatus: Decodable, Identifiable, Hashable, Sendable {
     var context: String
     var description: String?
     var targetURL: String?
+    /// The job and run behind the check, when the server names them
+    /// (GitHub check runs, GitLab jobs); Forgejo's are found by URL.
+    var jobID: Int?
+    var runID: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, status, context, description
         case targetURL = "target_url"
+        case jobID = "gnv_job_id"
+        case runID = "gnv_run_id"
     }
 
     var state: CheckState {

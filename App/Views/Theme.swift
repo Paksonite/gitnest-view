@@ -33,6 +33,7 @@ enum Theme {
     static let purple = dynamic(light: 0x7C4DDB, dark: 0xA78BFA)
     static let blue = dynamic(light: 0x2F6FDE, dark: 0x6EA8FE)
     static let teal = dynamic(light: 0x0E7C86, dark: 0x5CC8D4)
+    static let pink = dynamic(light: 0xC23C8A, dark: 0xEE7CC0)
 
     static let radius: CGFloat = 8
 }
@@ -629,26 +630,177 @@ enum JiraLook {
         if category == "indeterminate" { return Theme.blue }
         return Theme.secondary
     }
+
+    /// Jira's priority ladder, in English and Polish names, as colour and arrow.
+    /// Rank 4 is the most urgent, 0 the least; nil for a name off the ladder.
+    static func priorityRank(_ name: String?) -> Int? {
+        guard let name = name?.lowercased(), !name.isEmpty else { return nil }
+        func has(_ words: [String]) -> Bool { words.contains { name.contains($0) } }
+        if has(["lowest", "najniż", "trivial", "trywial"]) { return 0 }
+        if has(["highest", "najwyż", "blocker", "critical", "krytycz", "urgent", "pilny", "p1"]) { return 4 }
+        if has(["high", "wysok", "major", "p2"]) { return 3 }
+        if has(["medium", "średni", "sredni", "normal", "p3"]) { return 2 }
+        if has(["low", "nisk", "minor", "p4"]) { return 1 }
+        return nil
+    }
+
+    static func priority(_ name: String?) -> Color {
+        switch priorityRank(name) {
+        case 4: Theme.red
+        case 3: Theme.orange
+        case 2: Theme.yellow
+        case 1: Theme.blue
+        case 0: Theme.teal
+        default: Theme.secondary
+        }
+    }
+
+    static func prioritySymbol(_ name: String?) -> String {
+        switch priorityRank(name) {
+        case 4: "chevron.up.2"
+        case 3: "chevron.up"
+        case 1: "chevron.down"
+        case 0: "chevron.down.2"
+        default: "equal"
+        }
+    }
+
+    /// A label keeps its colour wherever it appears: picked from its name.
+    static func label(_ name: String) -> Color {
+        let palette: [Color] = [Theme.blue, Theme.purple, Theme.green, Theme.orange, Theme.teal, Theme.red, Theme.yellow, Theme.pink]
+        let seed = name.lowercased().unicodeScalars.reduce(5381) { ($0 &* 33 &+ Int($1.value)) & 0xFFFFFF }
+        return palette[seed % palette.count]
+    }
 }
 
-/// A round mark with a person's initials, coloured by who they are.
+/// Jira's priority as its arrow, coloured by urgency.
+struct PriorityMark: View {
+    let name: String?
+    var size: CGFloat = 11
+
+    var body: some View {
+        Image(systemName: JiraLook.prioritySymbol(name))
+            .font(.system(size: size, weight: .bold))
+            .foregroundStyle(JiraLook.priority(name))
+            .frame(width: size + 3)
+            .help(name.map { "Priority: \($0)" } ?? "No priority")
+            .accessibilityLabel("Priority: \(name ?? "none")")
+    }
+}
+
+/// A label as a coloured chip.
+struct LabelChip: View {
+    let name: String
+    var body: some View {
+        let color = JiraLook.label(name)
+        Text(name)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .padding(.horizontal, 7).frame(height: 20)
+            .background(color.opacity(0.14), in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(color.opacity(0.35)))
+    }
+}
+
+/// A person: their own picture when they set one, else initials in a
+/// colour that stays theirs.
 struct PersonMark: View {
     let name: String
     var id: String?
+    var avatar: URL?
     var size: CGFloat = 22
 
     private static let colors: [Color] = [Theme.blue, Theme.purple, Theme.green, Theme.orange, Theme.yellow, Theme.red]
 
     var body: some View {
-        let initials = name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
+        initials
+            .overlay {
+                if let avatar {
+                    AsyncImage(url: avatar, transaction: Transaction(animation: .easeOut(duration: 0.15))) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill().frame(width: size, height: size).clipShape(Circle())
+                        }
+                    }
+                }
+            }
+            .accessibilityHidden(true)
+    }
+
+    private var initials: some View {
+        let letters = name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
         let seed = (id ?? name).unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF }
         let color = Self.colors[seed % Self.colors.count]
-        Text(initials.isEmpty ? "?" : initials)
+        return Text(letters.isEmpty ? "?" : letters)
             .font(.system(size: size * 0.42, weight: .semibold))
             .foregroundStyle(color)
             .frame(width: size, height: size)
             .background(color.opacity(0.18), in: Circle())
             .overlay(Circle().strokeBorder(color.opacity(0.35)))
-            .accessibilityHidden(true)
+    }
+}
+
+/// Faces in a row, overlapping, as Jira shows watchers.
+struct PeopleStack: View {
+    let people: [JiraTicket.Person]
+    var size: CGFloat = 22
+    var limit = 6
+
+    var body: some View {
+        HStack(spacing: -size * 0.3) {
+            ForEach(people.prefix(limit)) { person in
+                PersonMark(name: person.name, id: person.accountID, avatar: person.avatar, size: size)
+                    .background(Circle().fill(Theme.sidebar).padding(-1.5))
+                    .help(person.name)
+            }
+            if people.count > limit {
+                Text("+\(people.count - limit)").font(.system(size: size * 0.4, weight: .semibold)).foregroundStyle(Theme.secondary)
+                    .frame(width: size, height: size).background(Theme.card, in: Circle()).overlay(Circle().strokeBorder(Theme.border))
+            }
+        }
+    }
+}
+
+/// Lays children out in rows, wrapping to the next row when one is full.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        let width = rows.map { $0.width }.max() ?? 0
+        let height = rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: proposal.width.map { min($0, width) } ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.items {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row { var items: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = [Row()]
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let needed = rows[rows.count - 1].items.isEmpty ? size.width : rows[rows.count - 1].width + spacing + size.width
+            if needed > width, !rows[rows.count - 1].items.isEmpty {
+                rows.append(Row())
+            }
+            var row = rows[rows.count - 1]
+            row.width = row.items.isEmpty ? size.width : row.width + spacing + size.width
+            row.height = max(row.height, size.height)
+            row.items.append(index)
+            rows[rows.count - 1] = row
+        }
+        return rows.filter { !$0.items.isEmpty }
     }
 }

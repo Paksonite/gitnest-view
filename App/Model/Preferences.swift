@@ -58,34 +58,7 @@ extension AppModel {
     /// (the scope is missing) and nothing is ever changed.
     func permissions(host: String) async -> [PermissionCheck] {
         guard let client = client(for: host) else { return [] }
-        let probes: [(String, String, String, Bool, String, String)] = [
-            ("user", "Sign in and know who you are", "read:user", false, "GET", "user"),
-            ("repos", "List repositories, read pipelines and logs", "read:repository", false, "GET", "user/repos?limit=1"),
-            ("orgs", "Workspaces (organisations)", "read:organization", false, "GET", "user/orgs?limit=1"),
-            ("issues", "Pull requests, reviews and the Inbox", "read:issue", false, "GET", "repos/issues/search?limit=1&type=pulls"),
-            ("notes", "Unread marks from the server", "read:notification", false, "GET", "notifications?limit=1"),
-            ("write-repo", "Merge, open pull requests, run and re-run pipelines", "write:repository", true, "POST", "repos/gitnest-view-probe/none/pulls"),
-            ("write-issue", "Comment, review, labels, reviewers", "write:issue", true, "POST", "repos/gitnest-view-probe/none/issues/0/comments"),
-            ("write-notes", "Mark as read", "write:notification", true, "PATCH", "notifications/threads/0"),
-        ]
-        return await withTaskGroup(of: (Int, PermissionCheck).self) { group in
-            for (index, probe) in probes.enumerated() {
-                group.addTask {
-                    let status = await client.status(probe.4, probe.5)
-                    let answer: PermissionCheck.Answer
-                    if probe.3 {
-                        // Not found / unprocessable: the scope let it through. Forbidden: it did not.
-                        answer = [404, 405, 422, 400].contains(status) || (200..<300).contains(status) ? .yes : [401, 403].contains(status) ? .no : .unknown
-                    } else {
-                        answer = (200..<300).contains(status) ? .yes : [401, 403].contains(status) ? .no : .unknown
-                    }
-                    return (index, PermissionCheck(id: probe.0, feature: probe.1, scope: probe.2, writes: probe.3, answer: answer))
-                }
-            }
-            var all: [(Int, PermissionCheck)] = []
-            for await item in group { all.append(item) }
-            return all.sorted { $0.0 < $1.0 }.map(\.1)
-        }
+        return await client.permissions()
     }
 
     /// False only when the server said so: the token cannot change things

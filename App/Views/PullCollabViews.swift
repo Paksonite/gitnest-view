@@ -382,6 +382,7 @@ struct JiraCard: View {
                     HStack(spacing: 7) {
                         Button { model.ticketTarget = issue.key } label: {
                             HStack(spacing: 7) {
+                                PriorityMark(name: issue.fields.priority?.name, size: 10)
                                 Text(issue.key).font(.system(size: 11.5, weight: .semibold, design: .monospaced)).foregroundStyle(Theme.blue)
                                 Text(issue.fields.summary).lineLimit(1)
                                 Spacer(minLength: 4)

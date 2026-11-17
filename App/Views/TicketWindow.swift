@@ -58,6 +58,7 @@ private struct TicketWindow: View {
                     Text("· \(ticket.project)").foregroundStyle(Theme.tertiary).lineLimit(1)
                     if let parent = ticket.parent {
                         Button("in \(parent)") { model.ticketTarget = parent }.buttonStyle(.plain).foregroundStyle(Theme.blue).linkCursor()
+                            .help(ticket.parentTicket.map { "\(parent): \($0.summary)" } ?? "Open \(parent)")
                     }
                 }
                 Spacer()
@@ -139,12 +140,17 @@ private struct TicketWindow: View {
                     }
                     .buttonStyle(ChipButtonStyle())
                 }
+                if !ticket.labels.isEmpty {
+                    FlowLayout(spacing: 5) { ForEach(ticket.labels, id: \.self) { LabelChip(name: $0) } }
+                }
+                blockedBanner(ticket)
                 Card("Description") {
                     Text(ticket.description.isEmpty ? "No description." : ticket.description)
                         .foregroundStyle(ticket.description.isEmpty ? Theme.secondary : Theme.text)
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 }
             }
+            related(ticket)
             Card("Comments") {
                 Text("\(ticket.comments.count)").font(.system(size: 12)).foregroundStyle(Theme.secondary)
             } content: {
@@ -155,6 +161,61 @@ private struct TicketWindow: View {
                 }
             }
         }
+    }
+
+    /// Open blockers, said before anything else.
+    @ViewBuilder private func blockedBanner(_ ticket: JiraTicket) -> some View {
+        let open = ticket.links.filter { $0.relation.lowercased().hasPrefix("is blocked") && $0.statusCategory != "done" }
+        if !open.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "hand.raised.fill").foregroundStyle(Theme.red)
+                Text("Blocked by ").font(.system(size: 12.5, weight: .semibold))
+                    + Text(open.map(\.key).joined(separator: ", ")).font(.system(size: 12.5, weight: .semibold, design: .monospaced))
+                Spacer()
+            }
+            .padding(.horizontal, 11).frame(height: 32)
+            .background(Theme.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.red.opacity(0.35)))
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// Parent, sub-tasks and links, grouped as Jira groups them; a click opens one.
+    @ViewBuilder private func related(_ ticket: JiraTicket) -> some View {
+        let groups = relatedGroups(ticket)
+        if !groups.isEmpty {
+            Card("Related") {
+                Text("\(groups.reduce(0) { $0 + $1.items.count })").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+            } content: {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(groups, id: \.title) { group in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(group.title).font(.system(size: 11, weight: .semibold)).foregroundStyle(group.tint)
+                            ForEach(group.items) { item in RelatedRow(item: item) { model.ticketTarget = item.key } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private struct RelatedGroup { var title: String; var tint: Color; var items: [JiraTicket.Related] }
+
+    private func relatedGroups(_ ticket: JiraTicket) -> [RelatedGroup] {
+        var groups: [RelatedGroup] = []
+        if let parent = ticket.parentTicket { groups.append(RelatedGroup(title: "Parent", tint: Theme.secondary, items: [parent])) }
+        if !ticket.subtasks.isEmpty { groups.append(RelatedGroup(title: "Sub-tasks", tint: Theme.secondary, items: ticket.subtasks)) }
+        // Blockers first, then everything else in Jira's order of relations.
+        var order: [String] = []
+        for link in ticket.links where !order.contains(link.relation) { order.append(link.relation) }
+        order.sort { ($0.lowercased().contains("block") ? 0 : 1) < ($1.lowercased().contains("block") ? 0 : 1) }
+        for relation in order {
+            let blocked = relation.lowercased().hasPrefix("is blocked")
+            groups.append(RelatedGroup(title: relation.prefix(1).uppercased() + relation.dropFirst(),
+                                       tint: blocked ? Theme.red : (relation.lowercased().contains("block") ? Theme.orange : Theme.secondary),
+                                       items: ticket.links.filter { $0.relation == relation }))
+        }
+        return groups
     }
 
     /// A new comment, under the conversation as in Jira.
@@ -194,11 +255,27 @@ private struct TicketWindow: View {
                     change(person.map { "\(key) is now with \($0.displayName)" } ?? "\(key) is unassigned") { try await $0.assign(key, to: person?.accountId) }
                 }
             }
+            if let sprint = ticket.sprint { sprintBox(sprint, all: ticket.sprints) }
+            watchersBox(ticket)
             HLine()
             VStack(alignment: .leading, spacing: 9) {
                 label("Details")
-                detail("Reporter", ticket.reporter ?? "—") { EmptyView() }
-                detail("Priority", ticket.priority ?? "—") {
+                HStack(spacing: 8) {
+                    Text("Reporter").foregroundStyle(Theme.secondary).frame(width: 70, alignment: .leading)
+                    if let reporter = ticket.reporter {
+                        PersonMark(name: reporter, id: ticket.reporterID, avatar: ticket.reporterAvatar, size: 18)
+                        Text(reporter).lineLimit(1)
+                    } else {
+                        Text("—")
+                    }
+                    Spacer(minLength: 4)
+                }
+                .font(.system(size: 12))
+                HStack(spacing: 8) {
+                    Text("Priority").foregroundStyle(Theme.secondary).frame(width: 70, alignment: .leading)
+                    PriorityMark(name: ticket.priority)
+                    Text(ticket.priority ?? "—").foregroundStyle(JiraLook.priority(ticket.priority)).lineLimit(1)
+                    Spacer(minLength: 4)
                     Menu("Change") {
                         ForEach(priorities, id: \.self) { name in
                             Button(name) { change("Priority of \(key) is \(name)") { try await $0.update(key, fields: ["priority": ["name": name]]) } }
@@ -206,6 +283,7 @@ private struct TicketWindow: View {
                     }
                     .menuStyle(.borderlessButton).fixedSize().font(.system(size: 11.5)).disabled(priorities.isEmpty)
                 }
+                .font(.system(size: 12))
                 field("Due date", $due, prompt: "YYYY-MM-DD") {
                     change("Due date of \(key) saved") { try await $0.update(key, fields: ["duedate": due.isEmpty ? NSNull() : due as Any]) }
                 }
@@ -220,6 +298,68 @@ private struct TicketWindow: View {
             timeTracking(ticket)
         }
         .font(.system(size: 12.5))
+    }
+
+    /// The sprint the ticket is planned into, with its days.
+    private func sprintBox(_ sprint: JiraTicket.Sprint, all: [JiraTicket.Sprint]) -> some View {
+        let tint = sprint.active ? Theme.blue : (sprint.state == "future" ? Theme.purple : Theme.secondary)
+        return VStack(alignment: .leading, spacing: 6) {
+            label("Sprint")
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    Image(systemName: "flag.checkered").font(.system(size: 11)).foregroundStyle(tint)
+                    Text(sprint.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Badge(text: sprint.active ? "active" : (sprint.state == "future" ? "planned" : "closed"), color: tint, filled: false)
+                }
+                if let start = sprint.start, let end = sprint.end {
+                    let days = Calendar.current.dateComponents([.day], from: .now, to: end).day ?? 0
+                    Text("\(start.formatted(date: .abbreviated, time: .omitted)) – \(end.formatted(date: .abbreviated, time: .omitted))"
+                         + (sprint.active ? (days >= 0 ? " · \(days) \(days == 1 ? "day" : "days") left" : " · overdue") : ""))
+                        .font(.system(size: 11.5)).foregroundStyle(Theme.secondary)
+                }
+                if let goal = sprint.goal {
+                    Text(goal).font(.system(size: 11.5)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                let earlier = all.filter { $0.id != sprint.id && $0.state == "closed" }
+                if !earlier.isEmpty {
+                    Text("Carried over from \(earlier.map(\.name).joined(separator: ", "))").font(.system(size: 11)).foregroundStyle(Theme.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(9)
+            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.3)))
+        }
+    }
+
+    /// Who follows the ticket; one click to follow or stop.
+    private func watchersBox(_ ticket: JiraTicket) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            label("Watchers")
+            HStack(spacing: 8) {
+                if ticket.watchers.isEmpty {
+                    Text(ticket.watchCount == 0 ? "Nobody watches this ticket." : "\(ticket.watchCount) watching")
+                        .font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                } else {
+                    PeopleStack(people: ticket.watchers, size: 22)
+                        .help(ticket.watchers.map(\.name).joined(separator: ", "))
+                    Text("\(max(ticket.watchCount, ticket.watchers.count))").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                }
+                Spacer(minLength: 4)
+                if let me = model.jiraAccountID {
+                    Button(ticket.watching ? "Stop Watching" : "Watch", systemImage: ticket.watching ? "eye.slash" : "eye") {
+                        if ticket.watching {
+                            change("Stopped watching \(key)") { try await $0.unwatch(key, accountID: me) }
+                        } else {
+                            change("Watching \(key)") { try await $0.watch(key, accountID: me) }
+                        }
+                    }
+                    .buttonStyle(ChipButtonStyle())
+                    .disabled(working)
+                }
+            }
+        }
     }
 
     private func timeTracking(_ ticket: JiraTicket) -> some View {
@@ -283,7 +423,7 @@ private struct TicketWindow: View {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(ticket.worklogs.suffix(6).reversed()) { log in
                         HStack(spacing: 7) {
-                            PersonMark(name: log.author, size: 18)
+                            PersonMark(name: log.author, id: log.authorID, avatar: log.authorAvatar, size: 18)
                             Text(log.timeSpent).font(.system(size: 11.5, weight: .medium, design: .monospaced))
                             Text(log.author).font(.system(size: 11.5)).foregroundStyle(Theme.secondary).lineLimit(1)
                             Spacer()
@@ -376,7 +516,7 @@ private struct CommentBubble: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
-            PersonMark(name: comment.author, id: comment.authorID, size: 26)
+            PersonMark(name: comment.author, id: comment.authorID, avatar: comment.authorAvatar, size: 26)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(comment.author).font(.system(size: 12, weight: .semibold))
@@ -476,7 +616,7 @@ private struct AssigneePicker: View {
         Button { open.toggle() } label: {
             HStack(spacing: 8) {
                 if let name = ticket.assignee {
-                    PersonMark(name: name, id: ticket.assigneeID, size: 22)
+                    PersonMark(name: name, id: ticket.assigneeID, avatar: ticket.assigneeAvatar, size: 22)
                     Text(name).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
                 } else {
                     Image(systemName: "person.crop.circle.dashed").font(.system(size: 18)).foregroundStyle(Theme.tertiary)
@@ -522,7 +662,7 @@ private struct AssigneePicker: View {
                                 }
                                 Spacer(minLength: 6)
                                 if current { Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.blue) }
-                            }, mark: AnyView(PersonMark(name: person.displayName, id: person.accountId, size: 22))) { if !current { assign(person) } }
+                            }, mark: AnyView(PersonMark(name: person.displayName, id: person.accountId, avatar: person.avatar, size: 22))) { if !current { assign(person) } }
                             .accessibilityLabel(current ? "\(person.displayName), assigned now" : "Assign to \(person.displayName)")
                         }
                         if !searching, people.allSatisfy({ $0.accountId == ticket.assigneeID }) {
@@ -566,6 +706,31 @@ private struct AssigneePicker: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(MenuRowStyle())
+    }
+}
+
+/// Another ticket: how it relates, its key, what it is, where it stands.
+private struct RelatedRow: View {
+    let item: JiraTicket.Related
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 7) {
+                PriorityMark(name: item.priority, size: 10)
+                Text(item.key).font(.system(size: 11.5, weight: .semibold, design: .monospaced)).foregroundStyle(Theme.blue)
+                    .strikethrough(item.statusCategory == "done", color: Theme.tertiary)
+                Text(item.summary).font(.system(size: 12.5)).lineLimit(1).foregroundStyle(item.statusCategory == "done" ? Theme.secondary : Theme.text)
+                Spacer(minLength: 6)
+                Badge(text: item.status, color: JiraLook.status(item.status, category: item.statusCategory), filled: false)
+            }
+            .padding(.horizontal, 7).frame(height: 28)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(MenuRowStyle())
+        .linkCursor()
+        .help("Open \(item.key)\(item.type.map { " (\($0))" } ?? "")")
+        .accessibilityLabel("\(item.relation) \(item.key): \(item.summary), \(item.status)")
     }
 }
 
