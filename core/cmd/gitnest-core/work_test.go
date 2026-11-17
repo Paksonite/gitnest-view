@@ -467,3 +467,79 @@ func TestCloneReportsProgress(t *testing.T) {
 		t.Errorf("the clone is not checked out: %v", err)
 	}
 }
+
+func TestCompareShowsWhatAPullRequestBrings(t *testing.T) {
+	dir, _ := newRepo(t)
+	write(t, dir, "keep.txt", "keep\n")
+	write(t, dir, "gone.txt", "will be deleted\n")
+	write(t, dir, "old.txt", strings.Repeat("same line\n", 20))
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "base files")
+	git(t, dir, "push", "-q")
+
+	git(t, dir, "checkout", "-q", "-b", "feat/x")
+	write(t, dir, "a.txt", "one\nTWO\nthree\n")
+	write(t, dir, "new.txt", "new\n")
+	git(t, dir, "rm", "-q", "gone.txt")
+	git(t, dir, "mv", "old.txt", "renamed.txt")
+	if err := os.WriteFile(filepath.Join(dir, "blob.bin"), []byte{0, 1, 2, 0, 255}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "feature")
+	git(t, dir, "push", "-q", "-u", "origin", "feat/x")
+
+	// main moves on meanwhile: its own change is not the pull request's.
+	git(t, dir, "checkout", "-q", "main")
+	git(t, dir, "rm", "-q", "keep.txt")
+	git(t, dir, "commit", "-q", "-m", "main drops keep")
+	git(t, dir, "push", "-q")
+
+	var c struct {
+		Files []struct {
+			Path, Old, Status string
+			Added, Removed    int
+			Binary            bool
+		}
+		Patch string
+		Stale bool
+	}
+	must(t, "repo.compare", map[string]any{"path": dir, "base": "main", "head": "feat/x"}, &c)
+	got := map[string]string{}
+	for _, f := range c.Files {
+		got[f.Path] = f.Status
+		switch f.Path {
+		case "a.txt":
+			if f.Added != 1 || f.Removed != 1 {
+				t.Errorf("a.txt counts %+v", f)
+			}
+		case "renamed.txt":
+			if f.Old != "old.txt" {
+				t.Errorf("rename %+v", f)
+			}
+		case "blob.bin":
+			if !f.Binary {
+				t.Errorf("binary %+v", f)
+			}
+		case "gone.txt":
+			if f.Removed != 1 {
+				t.Errorf("deleted %+v", f)
+			}
+		}
+	}
+	want := map[string]string{"a.txt": "modified", "new.txt": "added", "gone.txt": "deleted", "renamed.txt": "renamed", "blob.bin": "added"}
+	for path, status := range want {
+		if got[path] != status {
+			t.Errorf("%s: %q, want %q (all: %v)", path, got[path], status, got)
+		}
+	}
+	if _, ok := got["keep.txt"]; ok {
+		t.Error("main's own deletion is not part of the pull request")
+	}
+	if c.Stale || !strings.Contains(c.Patch, "diff --git a/gone.txt b/gone.txt") || !strings.Contains(c.Patch, "-will be deleted") {
+		t.Errorf("patch: stale=%v\n%s", c.Stale, c.Patch)
+	}
+	if _, err := call(t, "repo.compare", map[string]any{"path": dir, "base": "main", "head": "nope"}); err == nil {
+		t.Error("a branch that is nowhere must be refused")
+	}
+}

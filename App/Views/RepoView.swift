@@ -51,6 +51,12 @@ struct RepoView: View {
                 tab = wanted
             }
             await model.refreshForge(repo, detailed: true, ifOlderThan: 8)
+            if model.initialOpen == "pull" {
+                model.initialOpen = nil
+                // The clones are found a moment after launch.
+                for _ in 0..<50 where model.clone(of: repo) == nil { try? await Task.sleep(for: .milliseconds(100)) }
+                if let branch = model.clone(of: repo)?.branch { model.sheet = .createPull(repo, head: branch) }
+            }
             if model.initialOpen == "clone" {
                 model.initialOpen = nil
                 Task { await model.clone(repo) }

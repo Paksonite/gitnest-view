@@ -1362,3 +1362,147 @@ func fileLines(path string) int {
 	}
 	return countLines(string(b))
 }
+
+// ----------------------------------------------------------- comparing
+
+// ChangedFile is one file a branch changes against another.
+type ChangedFile struct {
+	Path    string `json:"path"`
+	Old     string `json:"old,omitempty"` // the name before a rename
+	Status  string `json:"status"`        // added, modified, deleted, renamed
+	Added   int    `json:"added"`
+	Removed int    `json:"removed"`
+	Binary  bool   `json:"binary,omitempty"`
+}
+
+// Comparison is what merging head into base would bring: the changes on
+// head since the two parted (git diff base...head), as a pull request shows.
+type Comparison struct {
+	Base      string        `json:"base"`
+	Head      string        `json:"head"`
+	Files     []ChangedFile `json:"files"`
+	Patch     string        `json:"patch"`
+	Truncated bool          `json:"truncated,omitempty"`
+	// Stale: the server could not be asked, the remote branches are as last fetched.
+	Stale bool `json:"stale,omitempty"`
+}
+
+const maxComparePatch = 4 << 20
+
+// Compare fetches base and head from the default remote, then diffs them
+// as the server's branches. A branch the server lacks falls back to the
+// local branch of that name.
+func Compare(ctx context.Context, dir, base, head string) (Comparison, error) {
+	c := Comparison{Base: base, Head: head}
+	remote, err := defaultRemote(ctx, dir)
+	if err != nil {
+		return c, err
+	}
+	if _, err := run(ctx, kNet, dir, nil, "fetch", "-q", remote, base, head); err != nil {
+		// One of them may exist only here (not pushed yet): fetch what there is.
+		if _, err := run(ctx, kNet, dir, nil, "fetch", "-q", remote, base); err != nil {
+			c.Stale = true
+		}
+	}
+	ref := func(name string) (string, error) {
+		for _, r := range []string{"refs/remotes/" + remote + "/" + name, "refs/heads/" + name} {
+			if _, err := run(ctx, kRead, dir, nil, "rev-parse", "--verify", "-q", r+"^{commit}"); err == nil {
+				return r, nil
+			}
+		}
+		return "", fmt.Errorf("no branch %s here or on %s", name, remote)
+	}
+	b, err := ref(base)
+	if err != nil {
+		return c, err
+	}
+	h, err := ref(head)
+	if err != nil {
+		return c, err
+	}
+	rng := b + "..." + h
+	status, err := run(ctx, kRead, dir, nil, "diff", "--name-status", "-M", "-z", rng)
+	if err != nil {
+		return c, err
+	}
+	nums, err := run(ctx, kRead, dir, nil, "diff", "--numstat", "-M", "-z", rng)
+	if err != nil {
+		return c, err
+	}
+	c.Files = parseChanged(status, nums)
+	patch, err := run(ctx, kRead, dir, nil, "diff", "-M", "--no-color", "--no-ext-diff", rng)
+	if err != nil {
+		return c, err
+	}
+	if len(patch) > maxComparePatch {
+		cut := strings.LastIndex(patch[:maxComparePatch], "\ndiff --git ")
+		if cut <= 0 {
+			cut = maxComparePatch
+		}
+		patch, c.Truncated = patch[:cut+1], true
+	}
+	c.Patch = patch
+	return c, nil
+}
+
+// parseChanged joins `diff --name-status -z` and `diff --numstat -z`.
+func parseChanged(status, nums string) []ChangedFile {
+	var files []ChangedFile
+	f := strings.Split(strings.TrimSuffix(status, "\x00"), "\x00")
+	for i := 0; i < len(f); {
+		code := f[i]
+		if code == "" {
+			i++
+			continue
+		}
+		cf := ChangedFile{}
+		switch code[0] {
+		case 'A':
+			cf.Status = "added"
+		case 'D':
+			cf.Status = "deleted"
+		case 'R', 'C':
+			cf.Status = "renamed"
+		default:
+			cf.Status = "modified"
+		}
+		if (code[0] == 'R' || code[0] == 'C') && i+2 < len(f) {
+			cf.Old, cf.Path = f[i+1], f[i+2]
+			i += 3
+		} else if i+1 < len(f) {
+			cf.Path = f[i+1]
+			i += 2
+		} else {
+			break
+		}
+		files = append(files, cf)
+	}
+	// numstat -z: "added\tremoved\tpath\0", or for a rename
+	// "added\tremoved\t\0old\0new\0"; "-\t-" for a binary file.
+	n := strings.Split(strings.TrimSuffix(nums, "\x00"), "\x00")
+	counts := map[string][3]int{}
+	for i := 0; i < len(n); i++ {
+		parts := strings.SplitN(n[i], "\t", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		path := parts[2]
+		if path == "" && i+2 < len(n) {
+			path = n[i+2]
+			i += 2
+		}
+		a, errA := strconv.Atoi(parts[0])
+		r, _ := strconv.Atoi(parts[1])
+		binary := 0
+		if errA != nil {
+			binary = 1
+		}
+		counts[path] = [3]int{a, r, binary}
+	}
+	for i := range files {
+		if c, ok := counts[files[i].Path]; ok {
+			files[i].Added, files[i].Removed, files[i].Binary = c[0], c[1], c[2] == 1
+		}
+	}
+	return files
+}

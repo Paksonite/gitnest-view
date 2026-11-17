@@ -76,6 +76,14 @@ enum AppSection: Hashable, Sendable { case home, repositories, inbox, search }
 
 /// A form shown over the window.
 enum AppSheet: Hashable, Sendable {
+    /// Forms with a diff in them get more room.
+    var wide: Bool {
+        switch self {
+        case .release, .createPull: true
+        default: false
+        }
+    }
+
     case release(ForgeRepo)
     /// A pull request for a feature branch.
     case createPull(ForgeRepo, head: String)
@@ -316,7 +324,7 @@ final class AppModel {
 
     /// The tab a repository opens on, by its name; nil for the default.
     var initialTab: String?
-    /// Development only (`GNV_DEV_OPEN`): "log", "workspace", "branch" or "clone"
+    /// Development only (`GNV_DEV_OPEN`): "log", "workspace", "branch", "clone" or "pull"
     /// opens that piece of interface at launch, to look at it.
     var initialOpen: String?
     /// Development only (`GNV_DEV_REPO`): the repository selected at launch.

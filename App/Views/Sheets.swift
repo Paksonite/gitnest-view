@@ -30,7 +30,7 @@ struct SheetLayer: View {
                         case .releases: ReleasesSheet()
                         }
                     }
-                    .frame(width: min(640, window.size.width - 80))
+                    .frame(width: min(sheet.wide ? 900 : 640, window.size.width - 80))
                     .frame(maxHeight: window.size.height - 80)
                     .fixedSize(horizontal: false, vertical: true)
                     .background(Theme.window, in: RoundedRectangle(cornerRadius: 12))
@@ -137,6 +137,12 @@ struct ReleaseSheet: View {
     @State private var error: String?
     /// What the server has: the lists to choose from.
     @State private var branches: [String] = []
+    /// What the pull request would change, from the clone.
+    @State private var comparison: BranchComparison?
+    @State private var comparing = false
+    @State private var compareProblem: String?
+    /// The file whose diff is shown; nil shows them all.
+    @State private var shownFile: String?
 
     var body: some View {
         SheetFrame(title: release ? "Release \(repo.name)" : "New pull request in \(repo.name)", symbol: release ? "paperplane" : "arrow.triangle.pull") {
@@ -169,12 +175,13 @@ struct ReleaseSheet: View {
                         TextEditor(text: $text)
                             .font(.system(size: 12.5))
                             .scrollContentBackground(.hidden)
-                            .frame(height: 84)
+                            .frame(height: comparison == nil ? 84 : 56)
                             .padding(5)
                             .background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
                             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.border))
                     }
                     commits(draft)
+                    changes
                 }
             }
             if let error { ErrorLine(text: error) }
@@ -229,10 +236,73 @@ struct ReleaseSheet: View {
                     }
                 }
             }
-            .frame(maxHeight: 170)
+            .frame(maxHeight: comparison == nil ? 170 : 110)
             .fixedSize(horizontal: false, vertical: true)
             .background(Theme.inset, in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
+        }
+    }
+
+    /// The files the pull request changes, deletions called out, and their diff.
+    @ViewBuilder private var changes: some View {
+        if comparing && comparison == nil {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Reading the changes from the clone…").foregroundStyle(Theme.secondary)
+            }
+        } else if let problem = compareProblem {
+            Label(problem, systemImage: "exclamationmark.triangle").font(.system(size: 12)).foregroundStyle(Theme.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let comparison {
+            let deleted = comparison.deletedFiles
+            Field(label: "Changes · \(comparison.files.count) \(comparison.files.count == 1 ? "file" : "files") · +\(comparison.added) −\(comparison.removed)"
+                  + (comparison.stale == true ? " · as last fetched" : "")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !deleted.isEmpty {
+                        DeletionWarning(files: deleted, base: comparison.base) { shownFile = $0 }
+                    }
+                    HStack(alignment: .top, spacing: 0) {
+                        fileList(comparison).frame(width: 290)
+                        VLine()
+                        diffPane(comparison)
+                    }
+                    .frame(height: 250)
+                    .background(Theme.inset, in: RoundedRectangle(cornerRadius: 6))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
+                    if comparison.truncated == true {
+                        Text("The diff is cut short: it is too big to show whole. Every file is listed.").font(.system(size: 11.5)).foregroundStyle(Theme.secondary)
+                    }
+                }
+            }
+        } else if model.clone(of: repo) == nil {
+            Text("Clone \(repo.name) to see the changes before opening the pull request.").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+        }
+    }
+
+    private func fileList(_ comparison: BranchComparison) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                FileChangeRow(icon: "doc.on.doc", tint: Theme.secondary, path: "All files", detail: "+\(comparison.added) −\(comparison.removed)",
+                              selected: shownFile == nil) { shownFile = nil }
+                ForEach(comparison.files) { file in
+                    let look = FileChangeRow.look(file.status)
+                    FileChangeRow(icon: look.icon, tint: look.tint, path: file.old.map { "\($0) → \(file.path)" } ?? file.path,
+                                  detail: file.binary == true ? "binary" : "+\(file.added) −\(file.removed)",
+                                  selected: shownFile == file.path, struck: file.deleted) { shownFile = file.path }
+                }
+            }
+            .padding(4)
+        }
+    }
+
+    @ViewBuilder private func diffPane(_ comparison: BranchComparison) -> some View {
+        let text = shownFile.map { AppModel.section(of: comparison.patch, for: $0) } ?? comparison.patch
+        if text.isEmpty {
+            EmptyState(comparison.files.isEmpty ? "No changes in the files" : "No text to show", symbol: "doc",
+                       message: comparison.files.isEmpty ? "The commits change nothing between the two branches." : "A binary file, or one past the shown part of the diff.")
+        } else {
+            PatchText(text: text)
         }
     }
 
@@ -254,6 +324,7 @@ struct ReleaseSheet: View {
             draft = fresh
             title = fresh.title
             text = fresh.body
+            await compare(from: from, into: into, commits: fresh.commits.count)
         } catch {
             guard !Task.isCancelled, !(error is CancellationError), from == head.trimmingCharacters(in: .whitespaces),
                   into == base.trimmingCharacters(in: .whitespaces) else { return }
@@ -265,6 +336,27 @@ struct ReleaseSheet: View {
             default:
                 self.error = error.localizedDescription
             }
+        }
+    }
+
+    private func compare(from: String, into: String, commits: Int) async {
+        guard commits > 0 else {
+            comparison = nil
+            return
+        }
+        comparing = true
+        defer { comparing = false }
+        do {
+            let fresh = try await model.compareBranches(repo, base: into, head: from)
+            guard !Task.isCancelled, from == head.trimmingCharacters(in: .whitespaces), into == base.trimmingCharacters(in: .whitespaces) else { return }
+            comparison = fresh
+            compareProblem = nil
+            // A deletion is what is easy to miss: show it first.
+            shownFile = fresh?.deletedFiles.first?.path
+        } catch {
+            guard !Task.isCancelled else { return }
+            comparison = nil
+            compareProblem = "The changes cannot be shown: \(error.localizedDescription)"
         }
     }
 
@@ -1385,5 +1477,74 @@ struct ReleasesSheet: View {
         loading = true
         candidates = await model.releaseCandidates { done, of in progress = (done, of) }
         loading = false
+    }
+}
+
+/// Files the pull request deletes from the target branch, where they cannot be missed.
+private struct DeletionWarning: View {
+    let files: [BranchComparison.File]
+    let base: String
+    let show: (String) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "trash.fill").foregroundStyle(Theme.red).padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Deletes \(files.count) \(files.count == 1 ? "file" : "files") from \(base)")
+                    .font(.system(size: 12.5, weight: .semibold))
+                FlowLayout(spacing: 6) {
+                    ForEach(files.prefix(12)) { file in
+                        Button(file.path) { show(file.path) }
+                            .buttonStyle(.plain).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Theme.red)
+                            .help("Show what is removed from \(file.path)")
+                    }
+                    if files.count > 12 { Text("and \(files.count - 12) more").font(.system(size: 11.5)).foregroundStyle(Theme.secondary) }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Theme.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.red.opacity(0.4)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Deletes \(files.count) files from \(base)")
+    }
+}
+
+/// One file in the list of a comparison.
+private struct FileChangeRow: View {
+    let icon: String
+    let tint: Color
+    let path: String
+    let detail: String
+    let selected: Bool
+    var struck = false
+    let action: () -> Void
+
+    static func look(_ status: String) -> (icon: String, tint: Color) {
+        switch status {
+        case "added": ("plus.square.fill", Theme.green)
+        case "deleted": ("minus.square.fill", Theme.red)
+        case "renamed": ("arrow.right.square.fill", Theme.blue)
+        default: ("pencil.circle.fill", Theme.yellow)
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 11)).foregroundStyle(tint)
+                Text(path).font(.system(size: 11.5, design: .monospaced)).lineLimit(1).truncationMode(.head)
+                    .strikethrough(struck, color: Theme.red)
+                Spacer(minLength: 4)
+                Text(detail).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(Theme.tertiary)
+            }
+            .padding(.horizontal, 6).frame(height: 24)
+            .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(path)
+        .accessibilityLabel("\(path), \(detail)")
     }
 }

@@ -441,6 +441,24 @@ func registerWork(srv *rpc.Server) {
 		return nil, err
 	})
 
+	// repo.compare: what a pull request from head into base would change,
+	// read from the clone after fetching both branches.
+	srv.Handle("repo.compare", func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var p struct {
+			Path string `json:"path"`
+			Base string `json:"base"`
+			Head string `json:"head"`
+			Auth *Auth  `json:"auth"`
+		}
+		if err := decodeRepo(raw, &p, &p.Path); err != nil {
+			return nil, err
+		}
+		if p.Base == "" || p.Head == "" {
+			return nil, &rpc.Error{Code: -32602, Message: "compare needs a base and a head branch"}
+		}
+		return gitx.Compare(p.Auth.with(ctx), p.Path, p.Base, p.Head)
+	})
+
 	// repo.newcommits counts the commits on HEAD the server has on no branch,
 	// so the app can ask before publishing an empty branch.
 	srv.Handle("repo.newcommits", func(ctx context.Context, raw json.RawMessage) (any, error) {
