@@ -107,6 +107,7 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 }
 
 func (s *Server) dispatch(ctx context.Context, req request) {
+	ctx = context.WithValue(ctx, serverKey{}, s)
 	resp := response{JSONRPC: "2.0", ID: req.ID}
 	fn, ok := s.handlers[req.Method]
 	if !ok {
@@ -145,6 +146,33 @@ func (s *Server) write(resp response) {
 	if err != nil {
 		b, _ = json.Marshal(response{JSONRPC: "2.0", ID: resp.ID,
 			Error: &Error{Code: codeFailed, Message: "cannot encode result: " + err.Error()}})
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.out.Write(b)
+	s.out.WriteByte('\n')
+	s.out.Flush()
+}
+
+type serverKey struct{}
+
+type notification struct {
+	JSONRPC string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  any    `json:"params"`
+}
+
+// Notify sends the client a notification (a message without an id) from
+// inside a handler: progress of a long call, for example. Outside a
+// handler it does nothing.
+func Notify(ctx context.Context, method string, params any) {
+	s, ok := ctx.Value(serverKey{}).(*Server)
+	if !ok || s.out == nil {
+		return
+	}
+	b, err := json.Marshal(notification{JSONRPC: "2.0", Method: method, Params: params})
+	if err != nil {
+		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

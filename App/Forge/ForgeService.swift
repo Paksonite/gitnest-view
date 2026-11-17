@@ -133,9 +133,14 @@ protocol ForgeService: Sendable {
 
     /// What the token may do, one line per feature; never changes anything.
     func permissions() async -> [PermissionCheck]
+
+    /// The repository's size in KiB when a listing left it out (GitLab).
+    func repositorySize(_ repo: RepoSlug) async -> Int?
 }
 
 extension ForgeService {
+    func repositorySize(_ repo: RepoSlug) async -> Int? { nil }
+
     func pullRequests(_ repo: RepoSlug, state: String = "open", limit: Int = 50) async throws -> [PullRequest] {
         try await listPulls(repo, state: state, limit: limit)
     }

@@ -232,12 +232,24 @@ func register(srv *rpc.Server) {
 			URL  string `json:"url"`
 			Dest string `json:"dest"`
 			Auth *Auth  `json:"auth"`
+			// Progress names the clone in "progress" notifications; none are
+			// sent without it.
+			Progress string `json:"progress"`
 		}
 		if err := rpc.Params(raw, &p); err != nil {
 			return nil, err
 		}
 		dest := config.Expand(p.Dest)
-		if err := gitx.Clone(p.Auth.with(ctx), p.URL, dest); err != nil {
+		cctx := p.Auth.with(ctx)
+		if p.Progress != "" {
+			cctx = gitx.WithProgress(cctx, func(pr gitx.Progress) {
+				rpc.Notify(ctx, "progress", struct {
+					ID string `json:"id"`
+					gitx.Progress
+				}{p.Progress, pr})
+			})
+		}
+		if err := gitx.Clone(cctx, p.URL, dest); err != nil {
 			return nil, err
 		}
 		return map[string]any{"repos": statusOf(ctx, []string{dest})}, nil

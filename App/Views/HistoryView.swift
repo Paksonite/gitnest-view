@@ -12,8 +12,8 @@ struct HistoryView: View {
 
     var body: some View {
         if model.clone(of: repo) == nil {
-            EmptyState("Not cloned", symbol: "arrow.down.circle", message: "Clone the repository to see and edit its history.") {
-                Button("Clone") { Task { await model.clone(repo) } }.buttonStyle(ChipButtonStyle(prominent: true))
+            EmptyState(model.isCloning(repo) ? "Cloning \(repo.name)…" : "Not cloned", symbol: "arrow.down.circle", message: model.isCloning(repo) ? "Big repositories take a while; the bar shows git's progress." : "Clone the repository to see and edit its history.") {
+                CloneButton(repo: repo)
             }
         } else {
             switch mode {

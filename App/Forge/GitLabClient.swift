@@ -67,7 +67,8 @@ struct GitLabClient: ForgeService {
 
     func repositories(org: String) async throws -> [ForgeRepo] {
         let query: [URLQueryItem] = [.init(name: "include_subgroups", value: "true"), .init(name: "archived", value: "false"),
-                                     .init(name: "order_by", value: "last_activity_at"), .init(name: "with_shared", value: "false")]
+                                     .init(name: "order_by", value: "last_activity_at"), .init(name: "with_shared", value: "false"),
+                                     .init(name: "statistics", value: "true")]
         do {
             return try await list("groups/\(Self.escape(org))/projects", query: query).compactMap(Self.repo)
         } catch ForgeError.notFound {
@@ -78,7 +79,7 @@ struct GitLabClient: ForgeService {
 
     func userRepositories() async throws -> [ForgeRepo] {
         try await list("projects", query: [.init(name: "membership", value: "true"), .init(name: "archived", value: "false"),
-                                          .init(name: "order_by", value: "last_activity_at")], maxPages: 5).compactMap(Self.repo)
+                                          .init(name: "order_by", value: "last_activity_at"), .init(name: "statistics", value: "true")], maxPages: 5).compactMap(Self.repo)
     }
 
     static func repo(_ item: [String: Any]) -> ForgeRepo? {
@@ -94,7 +95,13 @@ struct GitLabClient: ForgeService {
             "ssh_url": item["ssh_url_to_repo"] ?? NSNull(), "clone_url": item["http_url_to_repo"] ?? NSNull(), "html_url": item["web_url"] ?? NSNull(),
             "open_pr_counter": item["open_merge_requests_count"] ?? NSNull(), "has_actions": pipelines ?? NSNull(),
             "updated_at": item["last_activity_at"] ?? item["updated_at"] ?? NSNull(),
+            "size": ((item["statistics"] as? [String: Any])?["repository_size"] as? Int).map { $0 / 1024 } ?? NSNull(),
         ])
+    }
+
+    func repositorySize(_ slug: RepoSlug) async -> Int? {
+        let item = try? await json(project(slug), query: [.init(name: "statistics", value: "true")]) as? [String: Any]
+        return ((item?["statistics"] as? [String: Any])?["repository_size"] as? Int).map { $0 / 1024 }
     }
 
     // MARK: Merge requests

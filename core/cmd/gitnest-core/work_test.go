@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -407,5 +408,62 @@ func TestBlockHistory(t *testing.T) {
 	}
 	if _, err := call(t, "repo.blockHistory", map[string]any{"path": dir, "file": "../x", "line": 1}); err == nil {
 		t.Error("a path outside the repository must be refused")
+	}
+}
+
+func TestCloneReportsProgress(t *testing.T) {
+	dir, origin := newRepo(t)
+	for i := 0; i < 40; i++ {
+		write(t, dir, fmt.Sprintf("f%02d.txt", i), strings.Repeat(fmt.Sprintf("line %d\n", i), 200))
+	}
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "many files")
+	git(t, dir, "push", "-q")
+
+	srv := rpc.NewServer()
+	register(srv)
+	dest := filepath.Join(t.TempDir(), "clone")
+	req, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "repo.clone",
+		"params": map[string]any{"url": "file://" + origin, "dest": dest, "progress": "lab/x"}})
+	var out bytes.Buffer
+	if err := srv.Serve(context.Background(), bytes.NewReader(append(req, '\n')), &out); err != nil {
+		t.Fatal(err)
+	}
+	var phases []string
+	answered := false
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var msg struct {
+			ID     *int `json:"id"`
+			Method string
+			Params struct {
+				ID      string
+				Phase   string
+				Percent int
+			}
+			Error *rpc.Error
+		}
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			t.Fatalf("%v: %s", err, line)
+		}
+		if msg.ID != nil {
+			if msg.Error != nil {
+				t.Fatalf("clone: %s", msg.Error.Message)
+			}
+			answered = true
+			continue
+		}
+		if msg.Method != "progress" || msg.Params.ID != "lab/x" || msg.Params.Percent < 0 || msg.Params.Percent > 100 {
+			t.Errorf("unexpected notification: %s", line)
+		}
+		phases = append(phases, msg.Params.Phase)
+	}
+	if !answered {
+		t.Fatal("the clone was not answered")
+	}
+	if !slices.Contains(phases, "Receiving objects") {
+		t.Errorf("no receiving progress among %v", phases)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "f39.txt")); err != nil {
+		t.Errorf("the clone is not checked out: %v", err)
 	}
 }

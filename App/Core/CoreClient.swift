@@ -27,6 +27,8 @@ actor CoreClient {
     private var input: FileHandle?
     private var pending: [Int: CheckedContinuation<Data, any Error>] = [:]
     private var nextID = 1
+    /// Hears the engine's progress notifications (a clone as it goes).
+    private var onProgress: (@Sendable (CoreProgress) -> Void)?
     /// Counts engine starts, so a reader that outlived its engine cannot fail
     /// the calls of the next one.
     private var generation = 0
@@ -151,8 +153,19 @@ actor CoreClient {
         return env
     }
 
+    func setProgressHandler(_ handler: @escaping @Sendable (CoreProgress) -> Void) {
+        onProgress = handler
+    }
+
     private func receive(_ line: Data) {
-        guard let envelope = try? JSONDecoder().decode(Envelope.self, from: line), let id = envelope.id else { return }
+        guard let envelope = try? JSONDecoder().decode(Envelope.self, from: line) else { return }
+        guard let id = envelope.id else {
+            // A notification: no answer to anything, news about a call still running.
+            if envelope.method == "progress", let note = try? JSONDecoder().decode(Notification<CoreProgress>.self, from: line) {
+                onProgress?(note.params)
+            }
+            return
+        }
         pending.removeValue(forKey: id)?.resume(returning: line)
     }
 
@@ -186,6 +199,11 @@ actor CoreClient {
         }
         let id: Int?
         let error: RPCError?
+        let method: String?
+    }
+
+    private struct Notification<Params: Decodable>: Decodable {
+        let params: Params
     }
 
     private struct ResultEnvelope<Result: Decodable>: Decodable {

@@ -17,8 +17,8 @@ struct ResourcesView: View {
         let clone = model.clone(of: repo)
         Group {
             if clone == nil {
-                EmptyState("Not cloned", symbol: "arrow.down.circle", message: "Resources are read from the configuration in the clone.") {
-                    Button("Clone") { Task { await model.clone(repo) } }.buttonStyle(ChipButtonStyle(prominent: true))
+                EmptyState(model.isCloning(repo) ? "Cloning \(repo.name)…" : "Not cloned", symbol: "arrow.down.circle", message: model.isCloning(repo) ? "Big repositories take a while; the bar shows git's progress." : "Resources are read from the configuration in the clone.") {
+                    CloneButton(repo: repo)
                 }
             } else if let items {
                 if items.isEmpty && usage.isEmpty {

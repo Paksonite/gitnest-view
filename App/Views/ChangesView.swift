@@ -44,8 +44,8 @@ struct ChangesView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
-                EmptyState("Not cloned", symbol: "arrow.down.circle", message: "Clone the repository to stage, commit and push from here.") {
-                    Button("Clone") { Task { await model.clone(repo) } }.buttonStyle(ChipButtonStyle(prominent: true))
+                EmptyState(model.isCloning(repo) ? "Cloning \(repo.name)…" : "Not cloned", symbol: "arrow.down.circle", message: model.isCloning(repo) ? "Big repositories take a while; the bar shows git's progress." : "Clone the repository to stage, commit and push from here.") {
+                    CloneButton(repo: repo)
                 }
             }
         }
