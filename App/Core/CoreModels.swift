@@ -443,3 +443,29 @@ extension TFItem {
         var many: Bool
     }
 }
+
+/// What merging one branch into another would change (`repo.compare`).
+struct BranchComparison: Decodable, Equatable, Sendable {
+    struct File: Decodable, Equatable, Identifiable, Sendable {
+        var path: String
+        var old: String?
+        /// added, modified, deleted, renamed.
+        var status: String
+        var added: Int
+        var removed: Int
+        var binary: Bool?
+        var id: String { path }
+        var deleted: Bool { status == "deleted" }
+    }
+
+    var base: String
+    var head: String
+    var files: [File]
+    var patch: String
+    var truncated: Bool?
+    var stale: Bool?
+
+    var added: Int { files.reduce(0) { $0 + $1.added } }
+    var removed: Int { files.reduce(0) { $0 + $1.removed } }
+    var deletedFiles: [File] { files.filter(\.deleted) }
+}

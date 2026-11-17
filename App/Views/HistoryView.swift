@@ -288,9 +288,16 @@ struct PatchText: NSViewRepresentable {
         return scroll
     }
 
+    final class Coordinator { var shown: String? }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let view = scroll.documentView as? NSTextView else { return }
+        // Rendering a big patch is costly: only when the text changed, and
+        // then from its top.
+        guard let view = scroll.documentView as? NSTextView, context.coordinator.shown != text else { return }
+        context.coordinator.shown = text
         view.textStorage?.setAttributedString(Self.render(text))
+        view.scrollToBeginningOfDocument(nil)
     }
 
     @MainActor

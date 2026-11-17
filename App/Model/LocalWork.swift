@@ -448,6 +448,23 @@ extension AppModel {
     }
 }
 
+// MARK: - Comparing branches
+
+extension AppModel {
+    /// What a pull request from `head` into `base` would change, read from
+    /// the clone after fetching both branches; nil without a clone.
+    func compareBranches(_ repo: ForgeRepo, base: String, head: String) async throws -> BranchComparison? {
+        guard let clone = clone(of: repo) else { return nil }
+        struct Params: Encodable, Sendable {
+            var path: String
+            var base: String
+            var head: String
+            var auth: GitAuth?
+        }
+        return try await core.call("repo.compare", Params(path: clone.path, base: base, head: head, auth: gitAuth(repo, clone)))
+    }
+}
+
 // MARK: - Reviewing and merging
 
 extension AppModel {
