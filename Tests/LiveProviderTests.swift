@@ -67,6 +67,16 @@ final class LiveProviderTests: XCTestCase {
         XCTAssertGreaterThan(log?.count ?? 0, 100, "a finished job's log")
         let tail = try await client.jobLog(repo, job: job.id, from: max(0, (log?.count ?? 0) - 10))
         XCTAssertEqual(tail?.count, 10, "a log read from an offset holds only what is after it")
+        // The log window: a finished job's log, split into its steps.
+        let follower = LogFollower()
+        follower.follow(LogTarget(repo: repo, runID: run.id, jobID: job.id, title: job.name, webURL: job.htmlURL), client: client)
+        for _ in 0..<100 where follower.live { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertFalse(follower.live, "a finished job's log is read once")
+        XCTAssertFalse(follower.steps.isEmpty)
+        let checkout = try XCTUnwrap(follower.steps.first { $0.step.name.hasPrefix("Run actions/checkout") }, "\(follower.steps.map(\.step.name))")
+        XCTAssertTrue(checkout.lines.contains { $0.text.hasPrefix("Run actions/checkout") }, "the step holds its own lines: \(checkout.lines.prefix(3).map(\.text))")
+        XCTAssertFalse(follower.steps.flatMap(\.lines).contains { $0.text.hasPrefix("##[") }, "GitHub's group markers are gone")
+        XCTAssertGreaterThan(follower.steps.filter { !$0.lines.isEmpty }.count, 2, "lines land in several steps")
         let byBranch = try await client.runs(repo, limit: 3, branch: found.defaultBranch ?? "main")
         XCTAssertTrue(byBranch.allSatisfy { $0.prettyRef == (found.defaultBranch ?? "main") })
 
@@ -101,6 +111,29 @@ final class LiveProviderTests: XCTestCase {
         XCTAssertEqual(ForgeKind.github.gitUser(login: "me"), "x-access-token")
         XCTAssertEqual(ForgeKind.gitlab.gitUser(login: "me"), "oauth2")
         XCTAssertEqual(ForgeKind.forgejo.gitUser(login: "me"), "me")
+    }
+
+    func testWholeLogSplitsIntoSteps() throws {
+        func at(_ time: String) -> Date { try! Date("2026-11-17T\(time)Z", strategy: .iso8601) }
+        let steps = [
+            WorkflowJob.Step(number: 1, name: "Set up job", status: "success", started: at("10:54:40"), stopped: at("10:54:41")),
+            WorkflowJob.Step(number: 2, name: "Run actions/checkout@v5", status: "success", started: at("10:54:42"), stopped: at("10:54:44")),
+            WorkflowJob.Step(number: 3, name: "Skipped", status: "skipped", started: nil, stopped: nil),
+            WorkflowJob.Step(number: 4, name: "Test", status: "success", started: at("10:54:45"), stopped: at("10:55:00")),
+        ]
+        let text = [
+            "2026-11-17T10:54:40.1148980Z ##[group]Runner Image Provisioner",
+            "2026-11-17T10:54:40.1155680Z ##[endgroup]",
+            "2026-11-17T10:54:42.0990110Z ##[group]Run actions/checkout@v5",
+            "2026-11-17T10:54:43.0000000Z [command]/usr/bin/git fetch",
+            "2026-11-17T10:54:46.0000000Z ok tests",
+            "2026-11-17T10:54:47.0000000Z ##[error]Process completed with exit code 1.",
+        ]
+        var tail = LogTail()
+        let lines = tail.append(Data((text.joined(separator: "\n") + "\n").utf8))
+        let split = LogFollower.split(lines, into: steps)
+        XCTAssertEqual(split.map { $0.lines.map(\.text) }, [["Runner Image Provisioner"], ["Run actions/checkout@v5", "$ /usr/bin/git fetch"], [], ["ok tests", "❌ Process completed with exit code 1."]])
+        XCTAssertTrue(split[3].lines.last?.isFailure == true)
     }
 
     func testGitLabTranslatesMergeRequestsAndPipelines() throws {
