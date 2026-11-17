@@ -267,6 +267,9 @@ func TestFetchAllAndFastForward(t *testing.T) {
 	if len(res.Results) != 2 || len(res.Rows) != 1 || !res.Rows[0].OK || res.Rows[0].Behind != 1 {
 		t.Fatalf("fetchAll: %+v", res)
 	}
+	if in := res.Rows[0].Incoming; len(in) != 1 || in[0].Subject != "upstream change" || in[0].Short == "" || in[0].Author == "" {
+		t.Errorf("incoming commits: %+v", in)
+	}
 	var failed int
 	for _, r := range res.Results {
 		if r.Error != "" {
@@ -541,5 +544,28 @@ func TestCompareShowsWhatAPullRequestBrings(t *testing.T) {
 	}
 	if _, err := call(t, "repo.compare", map[string]any{"path": dir, "base": "main", "head": "nope"}); err == nil {
 		t.Error("a branch that is nowhere must be refused")
+	}
+}
+
+func TestLineChangesAgainstHead(t *testing.T) {
+	dir, _ := newRepo(t) // a.txt: one two three
+	write(t, dir, "a.txt", "zero\none\nTWO\n")
+	var c struct {
+		Added, Modified, Deleted []int
+		Untracked                bool
+	}
+	must(t, "repo.linechanges", map[string]any{"path": dir, "file": "a.txt"}, &c)
+	if fmt.Sprint(c.Added) != "[1]" || fmt.Sprint(c.Modified) != "[3]" || len(c.Deleted) != 0 {
+		t.Errorf("a.txt: %+v", c)
+	}
+	write(t, dir, "a.txt", "one\nthree\n")
+	must(t, "repo.linechanges", map[string]any{"path": dir, "file": "a.txt"}, &c)
+	if fmt.Sprint(c.Deleted) != "[1]" || len(c.Added)+len(c.Modified) != 0 {
+		t.Errorf("deleted line: %+v", c)
+	}
+	write(t, dir, "new.txt", "x\n")
+	must(t, "repo.linechanges", map[string]any{"path": dir, "file": "new.txt"}, &c)
+	if !c.Untracked {
+		t.Errorf("new.txt is untracked: %+v", c)
 	}
 }

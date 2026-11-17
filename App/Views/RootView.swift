@@ -493,7 +493,8 @@ struct RepoRow: View, Equatable {
     /// Drawn dimmer: nothing to do here.
     let quiet: Bool
     let pinned: Bool
-    @State private var hovering = false
+    @State private var hover = HoverFlag()
+    private var hovering: Bool { hover.on }
     @State private var hoverTask: Task<Void, Never>?
 
     nonisolated static func == (a: RepoRow, b: RepoRow) -> Bool {
@@ -545,9 +546,11 @@ struct RepoRow: View, Equatable {
         }
         .buttonStyle(.plain)
         .opacity(quiet && !hovering && !selected ? 0.62 : 1)
-        .hoverBackground(selected: selected)
+        .background(selected ? Theme.selected : (hovering ? Theme.hover : .clear), in: RoundedRectangle(cornerRadius: 6))
+        .animation(Motion.hover, value: selected)
+        .onDisappear { hover.set(false) }
         .onHover { inside in
-            hovering = inside
+            hover.set(inside)
             hoverTask?.cancel()
             guard inside else { return }
             // A pointer that rests here is likely to click: read ahead.

@@ -50,6 +50,8 @@ struct FilePane: View {
     @State private var problem: String?
     /// Where the text is scrolled to and what is marked.
     @State private var focus: CodeFocus?
+    /// The lines that differ from the last commit.
+    @State private var changes: LineChanges?
 
     var body: some View {
         let clone = model.clone(of: target.repo)
@@ -63,6 +65,23 @@ struct FilePane: View {
                         .help("The file as it is in the clone, on \(branch)")
                 }
                 Spacer(minLength: 8)
+                if let changes, !changes.isEmpty {
+                    Button {
+                        model.changesFocus = target.file
+                        model.repoTab = .changes
+                    } label: {
+                        Text(changes.untracked == true ? "new" : "±\(changes.count)")
+                            .font(.system(size: 11.5, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(Theme.orange)
+                            .padding(.horizontal, 7).frame(height: 22)
+                            .background(Theme.orange.opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                    .help((changes.untracked == true ? "A new file, not committed yet. " : "\(changes.count) uncommitted \(changes.count == 1 ? "change" : "changes"), marked beside the line numbers. ")
+                          + (model.repoTab == .changes ? "Click to show its diff." : "Click to show it in Changes."))
+                    .accessibilityLabel("Show Changes")
+                }
                 Button("Copy Path", systemImage: "doc.on.doc") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(target.file, forType: .string)
@@ -73,6 +92,7 @@ struct FilePane: View {
                     if let clone { openInEditor(clone, target.file, line: focus?.line ?? target.line) }
                 }
                 .buttonStyle(ChipButtonStyle())
+                .fixedSize()
                 .help("Open this file in the editor to change it")
                 Button("Close File", systemImage: "sidebar.right") { model.fileTarget = nil }
                     .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(Theme.secondary)
@@ -88,7 +108,7 @@ struct FilePane: View {
                 if let problem {
                     EmptyState("Cannot show this file", symbol: "doc.questionmark", message: problem)
                 } else if let text {
-                    CodeText(text: text, language: Syntax.language(of: target.file), focus: focus) { model.fileTarget = nil }
+                    CodeText(text: text, language: Syntax.language(of: target.file), focus: focus, changes: changes) { model.fileTarget = nil }
                 } else {
                     ProgressView().controlSize(.small)
                 }
@@ -97,6 +117,10 @@ struct FilePane: View {
         }
         .background(Theme.window)
         .task(id: target) { await load() }
+        // Reread the marks when the clone changes (a save in the editor, a commit).
+        .task(id: "\(target.file)/\(model.clone(of: target.repo)?.changes ?? -1)/\(model.clone(of: target.repo)?.lastCommit ?? 0)/\(model.activations)") {
+            changes = await model.lineChanges(of: target.file, in: target.repo)
+        }
         .onExitCommand { model.fileTarget = nil }
     }
 
@@ -137,10 +161,13 @@ enum FileReader {
     }
 
     private static let skipped: Set<String> = [".git", ".terraform", ".terragrunt-cache", "node_modules", ".idea", ".vscode"]
-    private static let shown: Set<String> = ["tf", "hcl", "tfvars", "tofu", "yaml", "yml", "json", "md", "txt", "sh", "tpl", "tftpl", "toml", "cfg", "ini", "py"]
+    private static let shown: Set<String> = ["tf", "hcl", "tfvars", "tofu", "yaml", "yml", "json", "md", "txt", "sh", "tpl", "tftpl", "toml", "cfg", "ini", "py",
+                                             "j2", "jinja", "jinja2", "conf", "xml", "ps1", "psm1", "rb", "go", "swift", "js", "ts", "sql", "properties",
+                                             "env", "service", "csv", "rst", "bash", "zsh", "pl", "lua", "groovy", "gradle", "kt", "java", "cs", "php", "css", "html"]
+    private static let named: Set<String> = ["Makefile", "CODEOWNERS", "Dockerfile", "Jenkinsfile", "Vagrantfile", "Gemfile", "hosts", "inventory", ".gitignore", ".gitlab-ci.yml"]
 
     /// The clone's readable files, Terraform first, at most 3000.
-    static func list(_ root: String) -> [String] {
+    static func list(_ root: String, limit: Int = 3000) -> [String] {
         let base = URL(fileURLWithPath: root)
         guard let walker = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.isDirectoryKey], options: []) else { return [] }
         var found: [String] = []
@@ -151,10 +178,10 @@ enum FileReader {
                 if skipped.contains(name) { walker.skipDescendants() }
                 continue
             }
-            guard shown.contains(url.pathExtension.lowercased()) || name == "Makefile" || name == "CODEOWNERS" else { continue }
+            guard shown.contains(url.pathExtension.lowercased()) || named.contains(name) else { continue }
             let path = url.standardizedFileURL.path
             found.append(path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : path)
-            if found.count >= 3000 { break }
+            if found.count >= limit { break }
         }
         func rank(_ file: String) -> Int { Syntax.language(of: file) == .hcl ? 0 : 1 }
         return found.sorted { rank($0) != rank($1) ? rank($0) < rank($1) : $0.localizedStandardCompare($1) == .orderedAscending }
@@ -185,12 +212,15 @@ struct CodeText: NSViewRepresentable {
     let text: String
     let language: Syntax.Language
     let focus: CodeFocus?
+    /// Lines that differ from the last commit, marked beside their numbers.
+    var changes: LineChanges? = nil
     /// Escape pressed in the text.
     var onEscape: (() -> Void)? = nil
 
     final class Coordinator {
         var text: String?
         var focus: CodeFocus?
+        var changes: LineChanges?
         var observer: NSObjectProtocol?
         deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
     }
@@ -241,6 +271,14 @@ struct CodeText: NSViewRepresentable {
             ruler.lineStarts = Syntax.lineStarts(text)
             ruler.ruleThickness = CGFloat(max(3, String(ruler.lineStarts.count).count)) * 7.5 + 18
             view.scroll(.zero)
+        }
+        if coordinator.changes != changes {
+            coordinator.changes = changes
+            ruler.added = Set(changes?.added ?? [])
+            ruler.modified = Set(changes?.modified ?? [])
+            ruler.deleted = Set(changes?.deleted ?? [])
+            ruler.allNew = changes?.untracked == true
+            ruler.needsDisplay = true
         }
         guard coordinator.focus != focus else { return }
         let old = coordinator.focus
@@ -330,6 +368,12 @@ final class LineRuler: NSRulerView {
     weak var textView: NSTextView?
     var lineStarts: [Int] = [0]
     var marked: ClosedRange<Int>?
+    /// Uncommitted lines: a bar at the ruler's left edge, as editors draw it.
+    var added: Set<Int> = []
+    var modified: Set<Int> = []
+    /// Lines removed after these lines (0: at the top).
+    var deleted: Set<Int> = []
+    var allNew = false
 
     override var isFlipped: Bool { true }
 
@@ -366,6 +410,25 @@ final class LineRuler: NSRulerView {
                 break
             }
             let y = fragment.minY + inset - visible.minY
+            let number = line + 1
+            if allNew || added.contains(number) {
+                NSColor(Theme.green).setFill()
+                NSRect(x: 2, y: y, width: 3, height: fragment.height).fill()
+            } else if modified.contains(number) {
+                NSColor(Theme.yellow).setFill()
+                NSRect(x: 2, y: y, width: 3, height: fragment.height).fill()
+            }
+            if deleted.contains(number) || (number == 1 && deleted.contains(0)) {
+                // A small red wedge where lines were taken out.
+                let edge = deleted.contains(number) ? y + fragment.height : y
+                let wedge = NSBezierPath()
+                wedge.move(to: NSPoint(x: 1, y: edge - 4))
+                wedge.line(to: NSPoint(x: 7, y: edge))
+                wedge.line(to: NSPoint(x: 1, y: edge + 4))
+                wedge.close()
+                NSColor(Theme.red).setFill()
+                wedge.fill()
+            }
             let isMarked = marked?.contains(line + 1) ?? false
             if isMarked {
                 NSColor(Theme.blue).setFill()

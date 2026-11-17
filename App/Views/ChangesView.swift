@@ -12,6 +12,12 @@ struct ChangesView: View {
     /// The file whose diff is shown, and which side of it.
     @State private var selected: Pick?
     @State private var stashes: [Stash] = []
+    /// The left column: the changes, or every file of the clone.
+    #if DEBUG
+    @State private var showFiles = ProcessInfo.processInfo.environment["GNV_DEV_OPEN"] == "files"
+    #else
+    @State private var showFiles = false
+    #endif
 
     struct Pick: Hashable {
         var path: String
@@ -34,14 +40,34 @@ struct ChangesView: View {
                             OperationBanner(repo: repo, clone: clone)
                             HLine()
                         }
-                        fileList
+                        Segments(options: [(false, files.isEmpty ? "Changes" : "Changes \(files.count)"), (true, "Files")], selection: $showFiles)
+                            .padding(.horizontal, 10).padding(.vertical, 7)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HLine()
+                        if showFiles {
+                            RepoFiles(repo: repo, clone: clone, changed: files)
+                        } else {
+                            fileList
+                        }
                         HLine()
                         CommitBox(repo: repo, stagedCount: staged.count, unstagedCount: unstaged.count)
                     }
                     .frame(width: 360)
                     VLine()
-                    diffPane
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Group {
+                        if showFiles {
+                            // Browsing: the chosen file takes the whole right side.
+                            if let target = model.fileTarget, target.repo.id == repo.id {
+                                FilePane(target: target)
+                            } else {
+                                EmptyState("Choose a file", symbol: "doc.text.magnifyingglass",
+                                           message: "Uncommitted lines are marked beside the line numbers; ±N in the file's header shows its diff.")
+                            }
+                        } else {
+                            WithFilePane(repo: repo) { diffPane }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
                 EmptyState(model.isCloning(repo) ? "Cloning \(repo.name)…" : "Not cloned", symbol: "arrow.down.circle", message: model.isCloning(repo) ? "Big repositories take a while; the bar shows git's progress." : "Clone the repository to stage, commit and push from here.") {
@@ -51,6 +77,18 @@ struct ChangesView: View {
         }
         .task(id: "\(model.revision(repo))/\(model.activations)/\(clone?.changes ?? -1)/\(clone?.branch ?? "")/\(clone?.lastCommit ?? 0)") {
             await reload()
+        }
+        // The file beside the changes follows the chosen one.
+        .onChange(of: selected) {
+            guard !showFiles, let selected, let shown = model.fileTarget, shown.repo.id == repo.id, shown.file != selected.path,
+                  let file = files.first(where: { $0.path == selected.path }), !file.code.contains("D") else { return }
+            model.fileTarget = FileTarget(repo: repo, file: selected.path, line: nil)
+        }
+        .onChange(of: model.changesFocus) {
+            guard let wanted = model.changesFocus, let file = files.first(where: { $0.path == wanted }) else { return }
+            showFiles = false
+            selected = Pick(path: file.path, staged: !(file.unstaged || file.untracked))
+            model.changesFocus = nil
         }
     }
 
@@ -69,6 +107,11 @@ struct ChangesView: View {
                     selected = nil
                 }
             }
+        }
+        // Asked for from the file pane: that file.
+        if let wanted = model.changesFocus, let file = fresh.first(where: { $0.path == wanted }) {
+            selected = Pick(path: file.path, staged: !(file.unstaged || file.untracked))
+            model.changesFocus = nil
         }
         if selected == nil, let first = unstaged.first ?? staged.first ?? conflicts.first {
             selected = Pick(path: first.path, staged: !(first.unstaged || first.untracked))
@@ -384,6 +427,22 @@ private struct DiffPane: View {
                 Text(staged ? "staged" : file.untracked ? "new file" : "not staged").font(.system(size: 11.5)).foregroundStyle(Theme.tertiary)
             }
             Spacer()
+            // A deleted file has nothing left to read.
+            if !file.conflict, !file.code.contains("D") {
+                let open = model.fileTarget?.repo.id == repo.id && model.fileTarget?.file == file.path
+                Button(open ? "Hide File" : "View File", systemImage: open ? "sidebar.right" : "doc.text.magnifyingglass") {
+                    if open {
+                        model.fileTarget = nil
+                    } else {
+                        // At the first changed line of the shown side.
+                        let line = diff?.hunks.lazy.flatMap(\.rows).first(where: { $0.kind == "+" })?.new
+                        model.fileTarget = FileTarget(repo: repo, file: file.path, line: line)
+                    }
+                }
+                .buttonStyle(ChipButtonStyle())
+                .fixedSize()
+                .help(open ? "Close the file beside the changes" : "Read the whole file beside the changes, its changed lines marked")
+            }
             if !chosen.isEmpty {
                 Text("\(chosen.count) \(chosen.count == 1 ? "line" : "lines")").font(.system(size: 11.5)).foregroundStyle(Theme.secondary)
                 if !staged {
@@ -401,6 +460,7 @@ private struct DiffPane: View {
                     }
                 }
                 .buttonStyle(ChipButtonStyle())
+                .fixedSize()
             }
         }
         .padding(.horizontal, 12)
@@ -809,5 +869,85 @@ private struct StashSection: View {
                 }
             }
         }
+    }
+}
+
+/// Every readable file of the clone, its uncommitted ones marked; a click
+/// opens the file beside the list.
+private struct RepoFiles: View {
+    @Environment(AppModel.self) private var model
+    let repo: ForgeRepo
+    let clone: Repo
+    let changed: [ChangedFile]
+    @State private var all: [String]?
+    @State private var query = ""
+
+    var body: some View {
+        let marks = Dictionary(changed.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary)
+                TextField("Filter files", text: $query).textFieldStyle(.plain)
+            }
+            .font(.system(size: 12))
+            .padding(.horizontal, 8).frame(height: 26)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
+            .padding(8)
+            if let all {
+                let shown = query.isEmpty ? all : all.filter { $0.localizedCaseInsensitiveContains(query) }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(shown, id: \.self) { path in
+                            row(path, mark: marks[path])
+                        }
+                        if shown.isEmpty {
+                            Text(all.isEmpty ? "No text files to show." : "Nothing matches.").font(.system(size: 12)).foregroundStyle(Theme.secondary).padding(12)
+                        }
+                        if all.count >= 5000 {
+                            Text("The first 5000 files; filter to find the rest.").font(.system(size: 11)).foregroundStyle(Theme.tertiary).padding(8)
+                        }
+                    }
+                    .padding(.horizontal, 8).padding(.bottom, 6)
+                }
+            } else {
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: "\(clone.path)/\(clone.lastCommit)/\(clone.branch)/\(changed.count)") {
+            let root = clone.path
+            // New files first: they are what is being worked on.
+            let listed = await Task.detached(priority: .userInitiated) {
+                FileReader.list(root, limit: 5000).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            }.value
+            let fresh = changed.filter { $0.untracked && !listed.contains($0.path) }.map(\.path)
+            all = fresh + listed
+        }
+    }
+
+    private func row(_ path: String, mark: ChangedFile?) -> some View {
+        let shown = model.fileTarget?.repo.id == repo.id && model.fileTarget?.file == path
+        let folder = (path as NSString).deletingLastPathComponent
+        return Button {
+            model.fileTarget = shown ? nil : FileTarget(repo: repo, file: path, line: nil)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.text").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
+                (Text((path as NSString).lastPathComponent).foregroundStyle(mark == nil ? Theme.text : Theme.orange)
+                    + Text(folder.isEmpty ? "" : "  " + folder).foregroundStyle(Theme.tertiary))
+                    .font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 4)
+                if let mark {
+                    Text(mark.untracked ? "A" : mark.code.trimmingCharacters(in: .whitespaces).prefix(1).uppercased())
+                        .font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(mark.untracked ? Theme.green : Theme.orange)
+                        .help(mark.untracked ? "New, not committed" : "Changed since the last commit")
+                }
+            }
+            .padding(.horizontal, 6).frame(height: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverBackground(selected: shown, radius: 5)
+        .help(path)
     }
 }

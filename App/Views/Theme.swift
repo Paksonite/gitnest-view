@@ -554,13 +554,35 @@ extension View {
 private struct HoverBackground: ViewModifier {
     let selected: Bool
     let radius: CGFloat
-    @State private var hovering = false
+    @State private var hover = HoverFlag()
 
     func body(content: Content) -> some View {
         content
-            .background(selected ? Theme.selected : (hovering ? Theme.hover : .clear), in: RoundedRectangle(cornerRadius: radius))
+            .background(selected ? Theme.selected : (hover.on ? Theme.hover : .clear), in: RoundedRectangle(cornerRadius: radius))
             .animation(Motion.hover, value: selected)
-            .onHover { hovering = $0 }
+            .onHover { hover.set($0) }
+            .onDisappear { hover.set(false) }
+    }
+}
+
+/// Whether the pointer is over one thing. Only one thing at a time: SwiftUI
+/// sometimes misses the pointer leaving a row the list moved or redrew
+/// (the old row stayed lit beside the selected one), so entering the next
+/// one puts the last one out.
+@MainActor @Observable
+final class HoverFlag {
+    private(set) var on = false
+    @ObservationIgnored private static weak var current: HoverFlag?
+
+    func set(_ inside: Bool) {
+        if inside {
+            if Self.current !== self { Self.current?.on = false }
+            Self.current = self
+            if !on { on = true }
+        } else {
+            if on { on = false }
+            if Self.current === self { Self.current = nil }
+        }
     }
 }
 

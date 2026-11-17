@@ -256,3 +256,50 @@ func UnstageLines(ctx context.Context, dir string, d Diff, sel map[LineRef]bool)
 func DiscardLines(ctx context.Context, dir string, d Diff, sel map[LineRef]bool) error {
 	return ApplyPatch(ctx, dir, BuildPatch(d, sel, true), false, true)
 }
+
+// LineChanges marks a file's uncommitted lines against HEAD, by their
+// numbers in the working tree: what the file viewer's gutter shows.
+type LineChanges struct {
+	Added    []int `json:"added"`
+	Modified []int `json:"modified"`
+	// Deleted: lines were removed after this line (0: at the top).
+	Deleted []int `json:"deleted"`
+	// Untracked: the whole file is new to git.
+	Untracked bool `json:"untracked,omitempty"`
+}
+
+// FileLineChanges reads `git diff HEAD -U0` for one file.
+func FileLineChanges(ctx context.Context, dir, path string) (LineChanges, error) {
+	c := LineChanges{Added: []int{}, Modified: []int{}, Deleted: []int{}}
+	if _, err := run(ctx, kRead, dir, nil, "ls-files", "--error-unmatch", "--", path); err != nil {
+		c.Untracked = true
+		return c, nil
+	}
+	base := "HEAD"
+	if _, err := run(ctx, kRead, dir, nil, "rev-parse", "--verify", "-q", "HEAD"); err != nil {
+		base = "--cached" // no commit yet: against the index
+	}
+	args := []string{"diff", "--no-color", "--no-ext-diff", "-U0"}
+	if base == "HEAD" {
+		args = append(args, "HEAD")
+	}
+	out, err := run(ctx, kRead, dir, nil, append(args, "--", path)...)
+	if err != nil {
+		return c, err
+	}
+	for _, h := range ParseDiff(out).Hunks {
+		switch {
+		case h.OldLines == 0:
+			for i := 0; i < h.NewLines; i++ {
+				c.Added = append(c.Added, h.NewStart+i)
+			}
+		case h.NewLines == 0:
+			c.Deleted = append(c.Deleted, h.NewStart)
+		default:
+			for i := 0; i < h.NewLines; i++ {
+				c.Modified = append(c.Modified, h.NewStart+i)
+			}
+		}
+	}
+	return c, nil
+}

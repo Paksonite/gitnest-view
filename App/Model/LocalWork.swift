@@ -448,6 +448,16 @@ extension AppModel {
     }
 }
 
+// MARK: - Uncommitted lines of a file
+
+extension AppModel {
+    func lineChanges(of file: String, in repo: ForgeRepo) async -> LineChanges? {
+        guard let clone = clone(of: repo) else { return nil }
+        struct Params: Encodable, Sendable { var path: String; var file: String }
+        return try? await core.call("repo.linechanges", Params(path: clone.path, file: file))
+    }
+}
+
 // MARK: - Comparing branches
 
 extension AppModel {
