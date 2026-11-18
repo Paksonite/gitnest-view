@@ -272,7 +272,9 @@ struct CodeText: NSViewRepresentable {
             view.textStorage?.setAttributedString(Self.render(text, language: language))
             ruler.lineStarts = Syntax.lineStarts(text)
             ruler.ruleThickness = CGFloat(max(3, String(ruler.lineStarts.count).count)) * 7.5 + 18
-            view.scroll(.zero)
+            // The top left: the text starts beside the numbers, not under them.
+            scroll.contentView.scroll(to: NSPoint(x: -scroll.contentView.contentInsets.left, y: -scroll.contentView.contentInsets.top))
+            scroll.reflectScrolledClipView(scroll.contentView)
         }
         if coordinator.changes != changes {
             coordinator.changes = changes
@@ -311,7 +313,7 @@ struct CodeText: NSViewRepresentable {
             let y = min(max(0, rect.minY), limit)
             NSAnimationContext.runAnimationGroup { animation in
                 animation.duration = Motion.reduced ? 0 : 0.22
-                scroll.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: y))
+                scroll.contentView.animator().setBoundsOrigin(NSPoint(x: -scroll.contentView.contentInsets.left, y: y))
             }
             scroll.reflectScrolledClipView(scroll.contentView)
         }
@@ -380,6 +382,9 @@ final class LineRuler: NSRulerView {
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
+        // Opaque: text scrolled sideways passes under the numbers.
+        NSColor(Theme.window).setFill()
+        bounds.intersection(dirtyRect).fill()
         drawHashMarksAndLabels(in: dirtyRect)
     }
 

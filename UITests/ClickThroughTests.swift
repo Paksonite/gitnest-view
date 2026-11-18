@@ -259,6 +259,29 @@ final class ClickThroughTests: XCTestCase {
         mark("53")
     }
 
+    /// A diff with a long line scrolls sideways to the line's end. Needs a
+    /// clone of GNV_UI_LONG_REPO with an uncommitted GNV_UI_LONG_FILE whose
+    /// long line ends in "END-OF-LINE".
+    func testLongDiffLineScrollsToItsEnd() throws {
+        guard let repo = env["GNV_UI_LONG_REPO"], let file = env["GNV_UI_LONG_FILE"] else { throw XCTSkip("GNV_UI_LONG_REPO, GNV_UI_LONG_FILE") }
+        let window = app.windows.firstMatch
+        window.typeKey("k", modifierFlags: .command)
+        let field = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Jump'")).firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.click()
+        field.typeText(repo + "\r")
+        button("Changes", timeout: 15).click()
+        element(file, timeout: 15).click()
+        let end = app.staticTexts.matching(NSPredicate(format: "value CONTAINS 'END-OF-LINE' OR label CONTAINS 'END-OF-LINE'")).firstMatch
+        XCTAssertTrue(end.waitForExistence(timeout: 10), "the long line is not in the diff")
+        let pane = window.frame
+        // Far to the right: the end of the line comes into the window.
+        let diff = window.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
+        for _ in 0..<12 { diff.scroll(byDeltaX: -800, deltaY: 0) }
+        sleep(1)
+        XCTAssertLessThanOrEqual(end.frame.maxX, pane.maxX, "the end of the long line cannot be scrolled into view")
+    }
+
     func testMenuBarQuickAction() throws {
         _ = button("Home", timeout: 25)
         _ = element("Waiting for your review", timeout: 20)
