@@ -495,8 +495,11 @@ private struct DiffPane: View {
                         .font(.system(size: 11.5)).foregroundStyle(Theme.tertiary).padding(10)
                 }
             }
-            // At least as wide as the pane, so the line colours reach its edge.
-            .frame(minWidth: viewport.size.width, alignment: .leading)
+            // As wide as the longest line, which a lazy stack does not
+            // measure until it is on screen (its end could not be scrolled
+            // to), and at least as wide as the pane, so the line colours
+            // reach its edge.
+            .frame(minWidth: max(viewport.size.width, DiffRow.width(of: diff)), alignment: .leading)
             .padding(.bottom, 12)
         }
         }
@@ -548,6 +551,20 @@ private struct DiffPane: View {
 private struct DiffRow: View {
     let line: FileDiff.Line
     let chosen: Bool
+
+    private static let font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+    /// The two numbers, the sign and the space after the text.
+    private static let gutter: CGFloat = 40 + 40 + 22 + 16
+
+    /// How wide the diff's longest row is: the few longest lines are
+    /// measured (a tab or a wide character is wider than its count says).
+    static func width(of diff: FileDiff) -> CGFloat {
+        let rows = diff.hunks.lazy.flatMap(\.rows)
+        let most = rows.map(\.text.utf16.count).max() ?? 0
+        let longest = rows.map(\.text).filter { $0.utf16.count * 5 >= most * 4 }.prefix(5)
+        let text = longest.map { NSAttributedString(string: $0, attributes: [.font: font]).size().width }.max() ?? 0
+        return ceil(text) + gutter
+    }
 
     var body: some View {
         HStack(spacing: 0) {
