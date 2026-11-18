@@ -710,11 +710,10 @@ struct ChecksCard: View {
                 CheckRow(check: check) { Task { await model.openLog(for: check, in: repo) } }
             }
             if failed > 0, let rerun {
-                Button(model.supportsRerun(model.workspace?.host) ? "Run Failed Again" : "Re-run in Browser", systemImage: "arrow.clockwise", action: rerun)
+                Button("Run Failed Again", systemImage: "arrow.clockwise", action: rerun)
                     .buttonStyle(ChipButtonStyle())
                     .needsWrite()
-                    .help(model.supportsRerun(model.workspace?.host) ? "Run the failed pipelines of this commit again"
-                          : "Forgejo 16 has no re-run in its API: opens the run in the browser")
+                    .help("Run the failed pipelines of this commit again")
             }
             if !scheduled.isEmpty {
                 HLine().padding(.horizontal, -12)

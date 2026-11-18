@@ -334,11 +334,26 @@ struct Card<Content: View, Trailing: View>: View {
         return copy
     }
 
+    /// Makes the title a link to what the card is about.
+    var titleAction: (() -> Void)?
+    var titleHelp = ""
+
+    func titleAction(_ help: String, _ action: @escaping () -> Void) -> Card {
+        var copy = self
+        copy.titleAction = action
+        copy.titleHelp = help
+        return copy
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 if let leading { leading }
-                Text(title).font(.system(size: 12.5, weight: .medium)).foregroundStyle(Theme.text)
+                if let titleAction {
+                    CardTitleLink(title: title, action: titleAction).help(titleHelp)
+                } else {
+                    Text(title).font(.system(size: 12.5, weight: .medium)).foregroundStyle(Theme.text)
+                }
                 if let state { CheckIcon(state: state, size: 12) }
                 Spacer(minLength: 8)
                 trailing
@@ -352,6 +367,26 @@ struct Card<Content: View, Trailing: View>: View {
         }
         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius))
         .overlay(RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.border))
+    }
+}
+
+/// A card title that opens what the card is about: underlined under the pointer.
+private struct CardTitleLink: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title).font(.system(size: 12.5, weight: .medium)).underline(hovering)
+                Image(systemName: "arrow.right.circle").font(.system(size: 11)).opacity(hovering ? 1 : 0.55)
+            }
+            .foregroundStyle(hovering ? Theme.blue : Theme.text)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 

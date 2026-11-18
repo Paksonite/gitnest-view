@@ -5,13 +5,17 @@ import SwiftUI
 /// traffic are not the user's steps.
 struct InboxView: View {
     @Environment(AppModel.self) private var model
-    /// Only the server of the workspace on screen, or all of them.
-    @State private var onlyCurrent = false
+    /// One server picked from the menu, or all of them (empty).
+    @AppStorage("inboxServer") private var onlyHost = ""
+
+    private var allHosts: [String] {
+        let current = model.workspace?.host
+        return model.accounts.map(\.host).sorted { a, b in a == current ? true : b == current ? false : a < b }
+    }
 
     private var hosts: [String] {
-        let current = model.workspace?.host
-        let all = model.accounts.map(\.host).sorted { a, b in a == current ? true : b == current ? false : a < b }
-        return onlyCurrent ? all.filter { $0 == current } : all
+        let all = allHosts
+        return all.contains(onlyHost) ? [onlyHost] : all
     }
 
     var body: some View {
@@ -22,10 +26,7 @@ struct InboxView: View {
                 Text("Inbox").font(.system(size: 14, weight: .semibold))
                 Text("reviews asked of you and your own pull requests").foregroundStyle(Theme.secondary)
                 Spacer()
-                if several, let current = model.workspace?.host {
-                    Segments(options: [(false, "All servers"), (true, ServerName.short(current))], selection: $onlyCurrent)
-                        .help("All connected servers, or only \(current)")
-                }
+                if several { serverPicker }
                 if model.unreadCount > 0 {
                     Button("Mark All Read") { Task { await model.markAllRead() } }.buttonStyle(ChipButtonStyle())
                 }
@@ -48,6 +49,33 @@ struct InboxView: View {
             }
         }
         .task { await model.checkForNews() }
+    }
+
+    /// All connected servers, or one of them.
+    private var serverPicker: some View {
+        let all = allHosts
+        let picked = all.contains(onlyHost) ? onlyHost : nil
+        return Dropdown(id: "inbox-server", width: 280, autoOpen: model.initialOpen == "inbox-server") {
+            HStack(spacing: 6) {
+                if let picked { Circle().fill(ServerName.color(picked)).frame(width: 7, height: 7) }
+                Text(picked.map(ServerName.short) ?? "All servers").font(.system(size: 12, weight: .medium))
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
+            .help("Show every connected server, or one of them")
+        } content: {
+            DropdownItem(title: "All servers", symbol: "square.stack.3d.up", detail: "\(all.count)", checked: picked == nil) { onlyHost = "" }
+            DropdownDivider()
+            DropdownHeader(text: "Connected servers")
+            ForEach(all, id: \.self) { host in
+                let count = model.inbox.filter { $0.host == host }.count + model.myPulls.filter { $0.host == host }.count
+                DropdownItem(title: host, symbol: "server.rack",
+                             detail: count > 0 ? "\(count)" : nil, checked: picked == host) { onlyHost = host }
+            }
+        }
     }
 
     /// One server's part: its name always on top, so nothing is mistaken

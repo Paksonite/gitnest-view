@@ -143,9 +143,13 @@ extension AppModel {
                 toast("No failed pipeline to run again on \(slug.name) #\(pull.number)", .info)
                 return false
             }
+            let what = "Running \(failed.count == 1 ? "the pipeline" : "\(failed.count) pipelines") of \(slug.name) #\(pull.number) again"
             guard supportsRerun(slug.host) else {
-                rerunInBrowser(failed[0].htmlURL, what: "the pipeline of \(slug.name) #\(pull.number)")
-                return false
+                return await onWebPages(slug.host, success: what) { [weak self] in
+                    for run in failed { try await self?.rerunOnWeb(slug, run: run, job: nil) }
+                    try? await Task.sleep(for: .seconds(3))
+                    await self?.checkForNews()
+                }
             }
             for run in failed { try await client.rerun(slug, run: run.id) }
             toast("Running \(failed.count == 1 ? "the pipeline" : "\(failed.count) pipelines") of \(slug.name) #\(pull.number) again")
@@ -166,7 +170,15 @@ extension AppModel {
         do {
             let failed = try await client.runs(slug, limit: 10, headSHA: pull.head.sha).filter { $0.state == .failure }
             guard !failed.isEmpty else { return toast("No failed pipeline to run again on #\(pull.number)", .info) }
-            guard supportsRerun(slug.host) else { return rerunInBrowser(failed[0].htmlURL, what: "the pipeline of #\(pull.number)") }
+            guard supportsRerun(slug.host) else {
+                await onWebPages(slug.host, success: "Running \(failed.count == 1 ? "the pipeline" : "\(failed.count) pipelines") of #\(pull.number) again") { [weak self] in
+                    for run in failed { try await self?.rerunOnWeb(slug, run: run, job: nil) }
+                    try? await Task.sleep(for: .seconds(2))
+                    await self?.loadExtras(pull, in: repo)
+                    await self?.refreshForge(repo, detailed: true)
+                }
+                return
+            }
             for run in failed { try await client.rerun(slug, run: run.id) }
             toast("Running \(failed.count == 1 ? "the pipeline" : "\(failed.count) pipelines") of #\(pull.number) again")
             try? await Task.sleep(for: .seconds(2))

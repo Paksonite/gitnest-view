@@ -91,6 +91,11 @@ struct RootView: View {
             model.searchText = env["GNV_DEV_QUERY"] ?? ""
             model.section = .search
         }
+        if env["GNV_DEV_SECTION"] == "inbox" { model.section = .inbox }
+        if model.initialOpen == "websignin", let host = env["GNV_DEV_HOST2"] ?? env["GNV_DEV_HOST"] {
+            try? await Task.sleep(for: .seconds(3))
+            model.sheet = .webSignIn(host: host)
+        }
         if model.initialOpen == "palette" {
             try? await Task.sleep(for: .seconds(4))
             model.paletteOpen = true

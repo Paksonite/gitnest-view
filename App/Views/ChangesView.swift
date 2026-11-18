@@ -880,10 +880,13 @@ struct RepoFiles: View {
     let clone: Repo
     let changed: [ChangedFile]
     @State private var tree: FileTree?
-    @State private var expanded: Set<String> = []
     @State private var query = ""
-    /// Folders already opened for the changes, so closing one by hand sticks.
-    @State private var opened: Set<String> = []
+    /// The open folders live in the model, per clone: they stay as they were
+    /// when the tree comes back (another tab, another repo, a relaunch).
+    private var state: Binding<FileTreeState> {
+        Binding { model.treeState(of: clone.path) } set: { model.setTreeState($0, of: clone.path) }
+    }
+    private var expanded: Set<String> { state.wrappedValue.expanded }
 
     var body: some View {
         let marks = Dictionary(changed.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
@@ -892,7 +895,7 @@ struct RepoFiles: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary)
                 TextField("Filter files", text: $query).textFieldStyle(.plain)
                 if !expanded.isEmpty, query.isEmpty {
-                    Button("Collapse All", systemImage: "arrow.down.right.and.arrow.up.left") { expanded = [] }
+                    Button("Collapse All", systemImage: "arrow.down.right.and.arrow.up.left") { state.wrappedValue.expanded = [] }
                         .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(Theme.tertiary).help("Collapse every folder")
                 }
             }
@@ -931,9 +934,11 @@ struct RepoFiles: View {
             guard let paths = await model.treeFiles(of: repo) else { return }
             let fresh = await Task.detached(priority: .userInitiated) { FileTree.build(paths, changed: changedPaths) }.value
             // Folders that came to hold changes open by themselves, once.
-            let new = fresh.foldersWithChanges.subtracting(opened)
-            expanded.formUnion(new)
-            opened.formUnion(new)
+            var kept = state.wrappedValue
+            let new = fresh.foldersWithChanges.subtracting(kept.opened)
+            kept.expanded.formUnion(new)
+            kept.opened.formUnion(new)
+            state.wrappedValue = kept
             tree = fresh
             reveal(model.fileTarget)
         }
@@ -944,17 +949,19 @@ struct RepoFiles: View {
     private func reveal(_ target: FileTarget?) {
         guard let target, target.repo.id == repo.id else { return }
         var prefix = ""
+        var kept = state.wrappedValue
         for part in target.file.split(separator: "/").dropLast() {
             prefix = prefix.isEmpty ? String(part) : prefix + "/" + part
-            expanded.insert(prefix)
+            kept.expanded.insert(prefix)
         }
+        state.wrappedValue = kept
     }
 
     private func folderRow(_ row: FileTree.Row) -> some View {
         let open = !query.isEmpty || expanded.contains(row.path)
         return Button {
             guard query.isEmpty else { return }
-            if open { expanded.remove(row.path) } else { expanded.insert(row.path) }
+            if open { state.wrappedValue.expanded.remove(row.path) } else { state.wrappedValue.expanded.insert(row.path) }
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "chevron.right").font(.system(size: 8.5, weight: .semibold)).foregroundStyle(Theme.tertiary)

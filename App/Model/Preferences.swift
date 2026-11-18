@@ -87,17 +87,12 @@ extension AppModel {
     }
 
     /// Forgejo's API can start a run or a job again from version 17 on;
-    /// 16 can only do it in the browser. An unknown version is tried.
+    /// before, the app does it through the server's web pages (see
+    /// ForgeWebSession). An unknown version is tried with the API.
     func supportsRerun(_ host: String?) -> Bool {
         guard let host, let version = accounts.first(where: { $0.host == host })?.serverVersion,
               let major = Int(version.prefix { $0.isNumber }) else { return true }
         return major >= 17
-    }
-
-    /// Where a run can be started again by hand when the API cannot do it.
-    func rerunInBrowser(_ url: String?, what: String) {
-        toast("This server's Forgejo cannot run \(what) again from here: opened it in the browser, use Re-run there.", .info)
-        if let url = url.flatMap(URL.init) { openExternal(url) }
     }
 
     static let readOnlyNote = "This server's token is read-only: connect one with write access to repositories and issues to do this."
