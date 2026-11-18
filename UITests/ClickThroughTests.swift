@@ -46,6 +46,11 @@ final class ClickThroughTests: XCTestCase {
             "GNV_DEV_HOST": host, "GNV_DEV_TOKEN": token, "GNV_DEV_WORKDIR": workdir, "GNV_DEV_NOFETCH": "1",
             "GNV_DEV_WORKSPACE": env["GNV_UI_WORKSPACE"] ?? "", "GNV_DEV_LOGIN": env["GNV_UI_LOGIN"] ?? "",
         ]
+        // Recording a demo: the app shows GNV_UI_ALIAS's first name and talks to the second.
+        if let alias = env["GNV_UI_ALIAS"], let real = alias.split(separator: "=").last, let shown = alias.split(separator: "=").first {
+            app.launchEnvironment.merge(["GNV_DEV_ALIAS": alias, "GIT_CONFIG_COUNT": "1",
+                                         "GIT_CONFIG_KEY_0": "url.https://\(real)/.insteadOf", "GIT_CONFIG_VALUE_0": "https://\(shown)/"]) { $1 }
+        }
         if name.contains("Jira") {
             guard let site = env["GNV_UI_JIRA_SITE"], let email = env["GNV_UI_JIRA_EMAIL"], let jira = env["GNV_UI_JIRA_TOKEN"], let issue = env["GNV_UI_JIRA_ISSUE"] else {
                 throw XCTSkip("no test Jira configured (GNV_UI_JIRA_SITE, _EMAIL, _TOKEN, _ISSUE)")
@@ -97,6 +102,93 @@ final class ClickThroughTests: XCTestCase {
     }
 
     // MARK: Tests
+
+    /// A walk through the app for the README's animation, filmed from
+    /// outside (scripts/demo-gif.sh). Only when GNV_UI_DEMO=1; the demo
+    /// server's workspace has its own repositories (GNV_UI_DEMO_REPO is one
+    /// with local changes, GNV_UI_DEMO_ACTIONS one with pipeline runs).
+    func testDemoTour() throws {
+        guard env["GNV_UI_DEMO"] == "1", let work = env["GNV_UI_DEMO_REPO"], let actions = env["GNV_UI_DEMO_ACTIONS"] else {
+            throw XCTSkip("GNV_UI_DEMO=1, GNV_UI_DEMO_REPO, GNV_UI_DEMO_ACTIONS")
+        }
+        func pause(_ seconds: Double) { usleep(UInt32(seconds * 1_000_000)) }
+        // The button named exactly so first (a folder "modules" is not
+        // "terraform-modules"), then one whose name begins so.
+        func tap(_ text: String, timeout: TimeInterval = 10) {
+            let exact = app.buttons.matching(NSPredicate(format: "label ==[c] %@ OR title ==[c] %@", text, text)).firstMatch
+            let start = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", text)).firstMatch
+            let found = exact.waitForExistence(timeout: timeout) ? exact : start
+            if found.waitForExistence(timeout: 2) { found.hover(); pause(0.4); found.click() }
+        }
+        func tapContaining(_ text: String, timeout: TimeInterval = 10) {
+            let found = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", text)).firstMatch
+            if found.waitForExistence(timeout: timeout) { found.hover(); pause(0.4); found.click() }
+        }
+        let window = app.windows.firstMatch
+        // Repositories by ⌘K: what a user types, and the palette on film.
+        func goTo(_ repo: String) {
+            window.typeKey("k", modifierFlags: .command)
+            pause(0.8)
+            let field = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Jump'")).firstMatch
+            guard field.waitForExistence(timeout: 5) else { return }
+            field.click()
+            for character in repo { field.typeText(String(character)); usleep(90_000) }
+            pause(1.2)
+            field.typeKey(.return, modifierFlags: [])
+        }
+        _ = button("Home", timeout: 25)
+        tap("Home")
+        _ = app.staticTexts["Waiting for your review"].waitForExistence(timeout: 20)
+        try? "start".write(toFile: (env["GNV_UI_TMP"] ?? NSTemporaryDirectory()) + "/demo-start", atomically: true, encoding: .utf8)
+        pause(4)
+        // A repository with work in progress: its overview, the changes, the tree.
+        goTo(work)
+        pause(3.5)
+        tap("Changes")
+        pause(3)
+        tap("Files")
+        pause(2)
+        tap("modules")
+        pause(1)
+        tap("rules")
+        pause(2.5)
+        // Pull requests with their checks and reviews.
+        tap("Pull requests")
+        pause(2.5)
+        tapContaining("OPS-")
+        pause(4)
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6)).scroll(byDeltaX: 0, deltaY: -300)
+        pause(2.5)
+        // A pipeline's log, step by step.
+        goTo(actions)
+        pause(2)
+        tap("Actions")
+        pause(3)
+        tapContaining("ci: run")
+        pause(2.5)
+        tapContaining("single state")
+        pause(5)
+        // The Inbox: what waits for the user on every server.
+        tap("Inbox")
+        pause(3)
+        tap("All servers")
+        pause(2)
+        app.typeKey(.escape, modifierFlags: [])
+        pause(1)
+        // Search across every clone.
+        tap("Search")
+        pause(1)
+        let field = app.textFields.firstMatch
+        if field.waitForExistence(timeout: 5) {
+            field.click()
+            field.typeText("rules\r")
+        }
+        pause(4)
+        tap(work)
+        pause(3)
+        tap("Home")
+        pause(3)
+    }
 
     /// The ticket window over the app: status menu, assignee, comments,
     /// time. Logs 15 minutes on the test ticket (GNV_UI_JIRA_ISSUE); the

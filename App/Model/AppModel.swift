@@ -79,7 +79,7 @@ enum AppSheet: Hashable, Sendable {
     /// Forms with a diff in them get more room.
     var wide: Bool {
         switch self {
-        case .release, .createPull: true
+        case .release, .createPull, .webSignIn: true
         default: false
         }
     }
@@ -103,6 +103,8 @@ enum AppSheet: Hashable, Sendable {
     case editPull(ForgeRepo, PullRequest)
     /// What waits on develop in every repository of the workspace.
     case releases
+    /// Signing in to a server's web pages, for what its API cannot do.
+    case webSignIn(host: String)
 }
 
 /// The diff shown in a window over the app: a pull request's, all of it or
@@ -217,11 +219,16 @@ final class AppModel {
     var ticketTarget: String?
     /// The file open in the app's own viewer.
     var fileTarget: FileTarget?
+    /// The folders open in each clone's file tree (by clone path), kept
+    /// across visits and launches.
+    var fileTrees: [String: FileTreeState] = [:]
     private(set) var workflows: [String: [Workflow]] = [:] // by RepoSlug.key
     /// The jobs worth showing while they pass: the ones whose name contains
     /// one of these. Other jobs appear only when they fail.
     private(set) var keyJobs: [String] = AppModel.defaultKeyJobs
     static let defaultKeyJobs = ["Terraform single state", "filter plan", "Terragrunt plan"]
+    /// What to do once the user has signed in on a server's web pages.
+    @ObservationIgnored var afterWebSignIn: (@MainActor () async -> Void)?
     /// A pull request to show once its repository is on screen (from the Inbox).
     var pendingPull: Int?
 
@@ -275,6 +282,8 @@ final class AppModel {
         }
         workdir = defaults.string(forKey: Key.workdir)
         if let saved = defaults.stringArray(forKey: Key.keyJobs) { keyJobs = saved }
+        if let data = defaults.data(forKey: "fileTrees"),
+           let saved = try? JSONDecoder().decode([String: FileTreeState].self, from: data) { fileTrees = saved }
         if let data = defaults.data(forKey: Key.workspace) {
             workspace = try? JSONDecoder().decode(Workspace.self, from: data)
         }
@@ -294,6 +303,7 @@ final class AppModel {
             defaults.removePersistentDomain(forName: "pl.paksonite.gitnest-view.dev")
             return AppModel(tokens: MemoryTokenStore(), defaults: defaults)
         }
+        if let alias = env["GNV_DEV_ALIAS"] { DemoAlias.install(alias) }
         guard let host = env["GNV_DEV_HOST"], let token = env["GNV_DEV_TOKEN"], let workdir = env["GNV_DEV_WORKDIR"],
               let defaults = UserDefaults(suiteName: "pl.paksonite.gitnest-view.dev")
         else { return nil }
@@ -1350,7 +1360,14 @@ final class AppModel {
 
     func perform(_ action: RunAction, on run: WorkflowRun, in repo: ForgeRepo) async {
         guard let slug = slug(repo), let client = client(for: slug.host) else { return }
-        if action == .rerun, !supportsRerun(slug.host) { return rerunInBrowser(run.htmlURL, what: "run #\(run.number)") }
+        if action == .rerun, !supportsRerun(slug.host) {
+            await onWebPages(slug.host, success: "Run #\(run.number) starts again") { [weak self] in
+                try await self?.rerunOnWeb(slug, run: run, job: nil)
+                try? await Task.sleep(for: .seconds(1))
+                await self?.refreshForge(repo, detailed: true)
+            }
+            return
+        }
         do {
             switch action {
             case .rerun: try await client.rerun(slug, run: run.id)
@@ -1364,9 +1381,22 @@ final class AppModel {
         await refreshForge(repo, detailed: true)
     }
 
-    func rerun(_ job: WorkflowJob, in repo: ForgeRepo) async {
+    func rerun(_ job: WorkflowJob, of run: WorkflowRun? = nil, in repo: ForgeRepo) async {
         guard let slug = slug(repo), let client = client(for: slug.host) else { return }
-        if !supportsRerun(slug.host) { return rerunInBrowser(job.htmlURL, what: job.name) }
+        if !supportsRerun(slug.host) {
+            await onWebPages(slug.host, success: "\(job.name) starts again") { [weak self] in
+                guard let self else { return }
+                var owner = run
+                if owner == nil, let id = job.runID {
+                    owner = try await client.runs(slug, limit: 50).first { $0.id == id }
+                }
+                guard let owner else { throw ForgeWebSession.Failure.refused(slug.host, 404) }
+                try await self.rerunOnWeb(slug, run: owner, job: job)
+                try? await Task.sleep(for: .seconds(1))
+                await self.refreshForge(repo, detailed: true)
+            }
+            return
+        }
         do {
             try await client.rerun(slug, job: job.id)
             toast("\(job.name) starts again")
@@ -1497,4 +1527,61 @@ final class AppModel {
 private final class WeakModel: @unchecked Sendable {
     weak var value: AppModel?
     init(_ value: AppModel) { self.value = value }
+}
+
+/// Which folders of a clone's file tree are open, and which ones opened by
+/// themselves for the changes (so closing one by hand sticks).
+struct FileTreeState: Codable, Equatable {
+    var expanded: Set<String> = []
+    var opened: Set<String> = []
+}
+
+extension AppModel {
+    func treeState(of clonePath: String) -> FileTreeState { fileTrees[clonePath] ?? FileTreeState() }
+
+    func setTreeState(_ state: FileTreeState, of clonePath: String) {
+        guard fileTrees[clonePath] != state else { return }
+        // A tree with thousands of folders open by "reveal" stays small enough;
+        // the cap keeps the defaults from growing without end.
+        var kept = state
+        if kept.expanded.count > 2000 { kept.expanded = Set(kept.expanded.sorted().prefix(2000)) }
+        if kept.opened.count > 2000 { kept.opened = Set(kept.opened.sorted().prefix(2000)) }
+        fileTrees[clonePath] = kept
+        if let data = try? JSONEncoder().encode(fileTrees) { defaults.set(data, forKey: "fileTrees") }
+    }
+}
+
+// MARK: - The web pages of servers whose API cannot do something
+
+extension AppModel {
+    /// Runs a run, or one of its jobs, again through the server's web pages
+    /// (Forgejo before 17). A job is named there by its place in the run.
+    func rerunOnWeb(_ slug: RepoSlug, run: WorkflowRun, job: WorkflowJob?) async throws {
+        var place: Int?
+        if let job {
+            guard let client = client(for: slug.host) else { return }
+            let all = try await client.jobs(slug, run: run.id).sorted { $0.id < $1.id }
+            guard let index = all.firstIndex(where: { $0.id == job.id }) else { throw ForgeWebSession.Failure.refused(slug.host, 404) }
+            place = index
+        }
+        try await ForgeWebSession.rerun(host: slug.host, owner: slug.owner, name: slug.name, run: run.number, job: place)
+    }
+
+    /// Does `work`, which uses the server's web session; when the user is not
+    /// signed in there yet, asks them to sign in and does it after.
+    @discardableResult
+    func onWebPages(_ host: String, success: String, _ work: @escaping @MainActor () async throws -> Void) async -> Bool {
+        do {
+            try await work()
+            toast(success)
+            return true
+        } catch ForgeWebSession.Failure.signInNeeded {
+            afterWebSignIn = { [weak self] in await self?.onWebPages(host, success: success, work) }
+            sheet = .webSignIn(host: host)
+            return false
+        } catch {
+            toast(error.localizedDescription, .error)
+            return false
+        }
+    }
 }

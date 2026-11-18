@@ -96,6 +96,7 @@ struct SearchView: View {
                                 }
                                 .padding(.horizontal, -6)
                             }
+                            .titleAction("Open this repository") { openRepo(hit.path) }
                         }
                     }
                     .padding(16)
@@ -127,6 +128,17 @@ struct SearchView: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    /// Goes to the repository the matches are in.
+    private func openRepo(_ path: String) {
+        guard let repo = model.repos.first(where: { model.clone(of: $0)?.path == path }) else {
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            return
+        }
+        model.section = .repositories
+        model.selection = repo.id
+        model.repoTab = .overview
     }
 
     /// Shows the line in the app's own viewer.

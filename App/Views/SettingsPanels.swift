@@ -87,6 +87,35 @@ private struct GeneralSettings: View {
     }
 }
 
+/// Forgejo before 17 re-runs pipelines through its web pages: whether the
+/// app is signed in there, and a way to forget it.
+private struct WebSessionRow: View {
+    @Environment(AppModel.self) private var model
+    let host: String
+    @State private var signedIn: Bool?
+
+    var body: some View {
+        LabeledContent("Re-run pipelines") {
+            HStack(spacing: 8) {
+                Text(signedIn == nil ? "…" : signedIn == true ? "through the web pages, signed in" : "through the web pages, sign in on first re-run")
+                    .foregroundStyle(.secondary)
+                if signedIn == true {
+                    Button("Sign Out") {
+                        Task {
+                            await ForgeWebSession.signOut(host)
+                            signedIn = await ForgeWebSession.signedIn(host)
+                        }
+                    }
+                } else if signedIn == false {
+                    Button("Sign In…") { model.sheet = .webSignIn(host: host) }
+                }
+            }
+        }
+        .help("This Forgejo has no API to run pipelines again (it came with Forgejo 17): GitNest View keeps a web session for it")
+        .task(id: model.sheet) { signedIn = await ForgeWebSession.signedIn(host) }
+    }
+}
+
 /// Each server on its own card: who, how, what the token may do.
 private struct ServerSettings: View {
     @Environment(AppModel.self) private var model
@@ -107,6 +136,9 @@ private struct ServerSettings: View {
                     }
                     Toggle("Notify me about this server", isOn: Binding(get: { !model.isMuted(account.host) }, set: { model.setMuted(!$0, host: account.host) }))
                     PermissionList(host: account.host)
+                    if account.forgeKind == .forgejo, !model.supportsRerun(account.host) {
+                        WebSessionRow(host: account.host)
+                    }
                     HStack {
                         Spacer()
                         Button("Remove \(ServerName.short(account.host))", role: .destructive) { model.disconnect(account) }

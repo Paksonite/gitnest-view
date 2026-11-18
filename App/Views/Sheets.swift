@@ -28,6 +28,7 @@ struct SheetLayer: View {
                         case .merge(let repo, let pull): MergeSheet(repo: repo, pull: pull)
                         case .editPull(let repo, let pull): EditPullSheet(repo: repo, pull: pull)
                         case .releases: ReleasesSheet()
+                        case .webSignIn(let host): WebSignInSheet(host: host)
                         }
                     }
                     .frame(width: min(sheet.wide ? 900 : 640, window.size.width - 80))
@@ -1580,5 +1581,35 @@ private struct FileChangeRow: View {
         .buttonStyle(.plain)
         .help(path)
         .accessibilityLabel("\(path), \(detail)")
+    }
+}
+
+/// Signs in to a server's web pages inside the app, for what its API cannot
+/// do (Forgejo before 17: running pipelines again). Then does what waited.
+struct WebSignInSheet: View {
+    @Environment(AppModel.self) private var model
+    let host: String
+
+    var body: some View {
+        SheetFrame(title: "Sign in to \(host)", symbol: "person.badge.key") {
+            Text("This server's Forgejo has no API to run pipelines again, only its web pages. Sign in once here, the way you do in a browser (tick “Remember this device”), and GitNest View re-runs jobs itself from then on. The session stays in GitNest View; Settings → Servers can forget it.")
+                .font(.system(size: 12)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+            WebSignInView(host: host) {
+                let next = model.afterWebSignIn
+                model.afterWebSignIn = nil
+                model.sheet = nil
+                if let next { Task { await next() } }
+            }
+            .frame(height: 520)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
+        } actions: {
+            Spacer()
+            Button("Cancel") {
+                model.afterWebSignIn = nil
+                model.sheet = nil
+            }
+            .buttonStyle(ChipButtonStyle())
+        }
     }
 }

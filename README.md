@@ -1,73 +1,106 @@
 # GitNest View
 
-**GitNest Desktop for Mac** — [gitnest](https://github.com/Paksonite/gitnest)
-as a native macOS app: every git repository on one screen, with the pull
-requests, reviews, pipeline checks and live job logs of your Forgejo, Gitea,
-GitLab or GitHub server.
+**Every git repository of your team on one screen: a native Mac app for Forgejo, Gitea, GitLab and GitHub.**
 
-GitNest View is gitnest: its engine is gitnest's own git code.
+![GitNest View: Home, a repository's changes and file tree, a pull request, a pipeline log, the Inbox and Search](docs/demo.gif)
 
-> Early development. Install with Homebrew (Apple silicon, macOS 14 or newer):
->
-> ```sh
-> brew trust paksonite/tap        # once: Homebrew asks before using a third-party tap
-> brew install --cask paksonite/tap/gitnest-view
-> ```
->
-> or the DMG from [Releases](https://github.com/Paksonite/gitnest-view/releases).
-> The token is kept in the Keychain. The app is signed with its own
-> certificate (no Apple Team ID), so after an update macOS may ask once for
-> the login password to let the new version read it: choose Always Allow.
-> The app updates itself (GitNest View → Check for Updates…). Releasing:
-> [docs/releasing.md](docs/releasing.md).
+GitNest View clones the repositories of an organisation or group, keeps them
+fetched, and shows you what needs you. That covers failed pipelines, reviews
+asked of you, your pull requests, and commits to pull or push. You can do the
+work from the same window. It is the desktop sibling of
+[gitnest](https://github.com/Paksonite/gitnest), the terminal UI, and runs on
+gitnest's own git engine.
 
-## What works
+- **Home: what needs you today.** A failed pipeline on the default branch,
+  your failing pull request, a review waiting for you, branches to pull or
+  push, uncommitted work. Each one has a single button to deal with it.
+- **A git client per repository.** Stage files or single lines, commit,
+  amend and push. Browse the whole file tree with the changed files marked.
+  Edit history (reword, squash, fixup, drop, revert) with undo for every
+  rewrite. Manage branches, tags and stashes.
+- **Pull requests where you work.** Reviews and the approvals the branch
+  protection needs, checks, commits, files and the diff. Open a pull request
+  with its diff, and get a warning when it deletes something. Merge,
+  rebase, draft, reviewers and labels.
+- **Pipelines with live logs.** Forgejo Actions, GitLab CI/CD and GitHub
+  Actions. Job logs are coloured and split into steps, and they follow a
+  running job. Start a workflow with its inputs, re-run or cancel, all
+  without a browser. The Terraform / OpenTofu plan is read straight from
+  the log.
+- **Across repositories at once.** Pull all (fast-forward every branch that
+  is behind, with the incoming commits listed), clone a whole workspace,
+  release pull requests (develop → main) in every repository, and search
+  the code of every clone.
+- **Inbox, menu bar and notifications.** Review requests and your own pull
+  requests from every connected server, a menu bar item with quick actions,
+  and macOS notifications.
+- **Jira, if you use it.** Tickets from your filter, their status, people,
+  links, sprint and time tracking, in the app's own window.
 
-**Find your way.** Home shows what needs you across the workspace (a
-failed pipeline on the default branch, your failing pull request, a review
-asked of you, commits to pull or push, uncommitted work) with one button to
-deal with each, your pull requests, the reviews waiting for you, and the
-commit activity of the last two weeks. The sidebar lists the repositories
-that need attention first. ⌘K jumps to any repository, pull request,
-branch or workflow, or runs a command. A menu bar item and macOS
-notifications (a review request, a failed pipeline of your pull request)
-tell you without switching windows.
+## Install
 
-**Work on a clone** (gitnest's engine underneath):
-- Changes: stage files or single lines, discard, commit or amend, push or
-  publish a branch, then open its pull request; stashes; finishing or
-  aborting a merge or rebase that stopped on conflicts; diverged branches
-  rebase or merge.
-- History: reword, squash, fixup, drop or revert a commit, with a second
-  question for commits already on the server, and undo for every rewrite;
-  branches: switch, create, rename, delete (also on the server), clean up
-  the ones whose server branch is gone.
-- Fetch all and pull all (fast-forward every branch that is behind, like
-  gitnest's pull all), and a quiet fetch every 10 minutes.
-- Clone one repository or all of a workspace with one click; open a clone
-  in your editor or terminal.
+Apple silicon, macOS 14 or newer. With Homebrew:
 
-**Pull requests and pipelines** on a connected server (Forgejo or Gitea,
-GitLab self-hosted or gitlab.com, GitHub or GitHub Enterprise; the kind is
-found out from the address): reviews
-(with the approvals the branch protection requires), checks, commits,
-files, the Terraform or OpenTofu plan read from the pipeline's log (or its
-error, when it failed), the apply after the merge, and only the jobs that
-matter (configurable) unless something else fails. Release opens the pull
-request from develop into the default branch with the tickets found in
-the commits. Actions lists the workflows, starts one by hand with its
-inputs, re-runs and cancels, and shows a job's log step by step, coloured,
-followed live while it runs.
+```sh
+brew install --cask paksonite/tap/gitnest-view
+```
 
-Requires macOS 14 or later on Apple silicon, `git`, and Forgejo 16 or later,
-a recent GitLab, or GitHub. On GitLab the token needs the `api` scope
-(`read_api` to look only); on GitHub a classic token with `repo`, `read:org`,
-`workflow` and `notifications`, or a fine-grained one. On Forgejo the token needs read access to repositories, organisations, issues and your
-user; opening a pull request, starting or re-running a workflow needs
-write access to repositories. With HTTPS remotes the same token is used for
-git, passed to git per command and never written into a clone.
+Homebrew may ask you to trust the tap first (`brew trust paksonite/tap`).
+You can also download the DMG from
+[Releases](https://github.com/Paksonite/gitnest-view/releases). The app
+updates itself: **GitNest View → Check for Updates…**.
 
-## Build
+The app needs `git` (it comes with the Xcode Command Line Tools:
+`xcode-select --install`).
+
+## Quick start
+
+1. **Connect a server.** On first launch the app asks for a server address
+   and an access token. It works out whether the server is Forgejo/Gitea,
+   GitLab or GitHub, and you can also pick the kind yourself. The token
+   page link takes you to the right place on the server.
+2. **Choose a folder** for the clones (for example `~/GitNest`) and a
+   **workspace**: an organisation, a group, or your own repositories.
+3. **Clone** one repository or all of them (**Get all repositories…**).
+   Existing clones in the folder are picked up as they are.
+
+Press **⌘K** from anywhere to jump to a repository, pull request, branch or
+workflow, or to run a command.
+
+### Tokens
+
+| Server | Token | Scopes |
+|---|---|---|
+| Forgejo / Gitea | Settings → Applications | read: repository, organisation, issue, user; write: repository (to open pull requests, run and re-run workflows) |
+| GitLab (self-hosted or gitlab.com) | Preferences → Access tokens | `api` (`read_api` to look only) |
+| GitHub / GitHub Enterprise | Settings → Developer settings → Tokens | classic: `repo`, `read:org`, `workflow`, `notifications`; or a fine-grained token |
+
+A read-only token works too: the app shows what it can do and greys out the
+rest. You can connect several servers; the Inbox shows all of them or the
+one you pick.
+
+Tokens are kept in the macOS Keychain. With HTTPS remotes the same token is
+used for git, passed to git per command and never written into a clone. If
+you prefer SSH keys, switch **Clone with** in Settings → Servers.
+
+## Good to know
+
+- **The Keychain question after an update.** The app is signed with its own
+  certificate (it has no Apple Team ID), so macOS asks once after each
+  update before the new version may read the tokens. Enter your login
+  password and choose **Always Allow**. Since 0.1.10 all tokens share one
+  Keychain item, so it is one question per update, not one per server.
+- **Re-running pipelines on Forgejo 16.** Forgejo added the API for
+  re-running jobs in version 17. On older servers the app re-runs them
+  through the server's web pages: the first time, it asks you to sign in
+  once in its own window. The session stays in the app; Settings → Servers
+  shows it and can sign you out.
+- **What it changes on its own.** Nothing on the server. Locally it fetches
+  every 10 minutes (Settings → General can turn it off); it never pulls,
+  rebases or pushes without you clicking.
+- **Requirements.** Forgejo 16 or newer, a recent GitLab, or GitHub.
+
+## Build from source
 
 Needs Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and Go 1.25+
 (`brew install xcodegen go`).
@@ -79,28 +112,26 @@ scripts/test.sh    # the engine's tests, then the app's
 ```
 
 `GitNestView.xcodeproj` is generated from `project.yml` and is not committed;
-run `xcodegen generate` to open it in Xcode.
-
-## Layout
+run `xcodegen generate` to open it in Xcode. Releasing:
+[docs/releasing.md](docs/releasing.md).
 
 | Path | What |
 |---|---|
 | `App/` | the macOS app (Swift, SwiftUI with AppKit where it matters) |
 | `App/Core` | talks to the engine: JSON-RPC over the engine's stdin/stdout |
-| `App/Forge` | `ForgeService` and its three clients (Forgejo/Gitea, GitHub, GitLab; see `docs/backendy-serwerow.md`), accounts, logs, Terraform plan and error parsing |
+| `App/Forge` | `ForgeService` and its three clients (Forgejo/Gitea, GitHub, GitLab; see `docs/backendy-serwerow.md`), accounts, the web session for Forgejo before 17, logs, Terraform plan and error parsing |
 | `App/Model` | the app's state: `AppModel`, work on clones (`LocalWork`), what needs attention, notifications |
 | `App/Views` | the window, Home, the repository tabs, ⌘K, sheets, menu bar item |
 | `core/` | the engine, `gitnest-core` (Go): gitnest's `gitx`, `scan`, `config` and `state` packages plus `internal/rpc`, `internal/workflow` and the methods in `cmd/gitnest-core` |
 | `design/` | the logo and the app icon (SVG); `scripts/make-icon.sh` renders them |
-| `Tests/` | the app's tests; `LiveForgejoTests`, `LiveProviderTests` (GitHub, GitLab) and `LiveJiraTests` run against real servers when `TEST_RUNNER_GNV_*` is set |
+| `Tests/`, `UITests/` | the app's tests; the `Live…` tests run against real servers when `TEST_RUNNER_GNV_*` is set, the UI tests through `scripts/ui-test.sh` |
 
 Signing: `scripts/sign.sh` uses `~/.config/paksonite-gitnest-view/signing.p12`
 (or `SIGNING_P12_BASE64` in CI), a self-signed certificate, so the app keeps
-one identity across builds and the Keychain does not ask again after each
-update; without it the app is signed ad hoc.
+one identity across builds; without it the app is signed ad hoc and macOS
+asks for the Keychain after every build.
 
-The engine's packages were copied from gitnest v2.0.20.
+The demo above is recorded by `UITests/ClickThroughTests.testDemoTour` against
+a demo organisation, with the window filmed from outside.
 
-## License
-
-MIT
+License: [MIT](LICENSE).

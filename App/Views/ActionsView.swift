@@ -190,11 +190,12 @@ struct ActionsView: View {
             Spacer()
             if working { ProgressView().controlSize(.small) }
             if run.state.isFinished {
-                Button(model.supportsRerun(model.workspace?.host) ? "Re-run" : "Re-run in Browser", systemImage: "arrow.clockwise") { act(.rerun, run) }
+                Button("Re-run", systemImage: "arrow.clockwise") { act(.rerun, run) }
                     .buttonStyle(ChipButtonStyle(prominent: run.state == .failure))
                     .needsWrite()
                     .disabled(working)
-                    .help(model.supportsRerun(model.workspace?.host) ? "Run all jobs of this run again" : "Forgejo 16 has no re-run in its API: opens the run in the browser")
+                    .help(model.supportsRerun(model.workspace?.host) ? "Run all jobs of this run again"
+                          : "Run all jobs of this run again (through the server's web pages: Forgejo before 17 has no API for it)")
             } else {
                 Button("Cancel", systemImage: "stop.fill") { act(.cancel, run) }
                     .buttonStyle(ChipButtonStyle())
@@ -238,7 +239,7 @@ struct ActionsView: View {
                     .contextMenu {
                         Button("Re-run This Job") {
                             Task {
-                                await model.rerun(job, in: repo)
+                                await model.rerun(job, of: run, in: repo)
                                 await loadJobs()
                             }
                         }
@@ -248,7 +249,7 @@ struct ActionsView: View {
                 if let failed = jobs.first(where: { $0.state == .failure }), jobs.count > 1 {
                     Button("Re-run failed job", systemImage: "arrow.clockwise") {
                         Task {
-                            await model.rerun(failed, in: repo)
+                            await model.rerun(failed, of: run, in: repo)
                             await loadJobs()
                         }
                     }

@@ -51,7 +51,7 @@ struct MenuBarView: View {
                         ForEach(model.myPulls.prefix(6)) { pull in
                             item(state: pull.state, title: pull.title,
                                  detail: "\(pull.repoFullName.split(separator: "/").last ?? "") #\(pull.number)",
-                                 quick: pull.state == .failure && model.supportsRerun(pull.host) ? QuickAction(id: "rerun:\(pull.id)", title: "Run Again") { await model.rerunFailed(pull) } : nil) {
+                                 quick: pull.state == .failure ? QuickAction(id: "rerun:\(pull.id)", title: "Run Again") { await model.rerunFailed(pull) } : nil) {
                                 activate()
                                 Task { await model.openPull(host: pull.host, fullName: pull.repoFullName, number: pull.number, url: pull.htmlURL) }
                             }
