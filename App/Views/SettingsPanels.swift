@@ -209,6 +209,13 @@ private struct NotificationSettings: View {
     var body: some View {
         SettingsPage {
             Section {
+                NotificationAccessRow()
+            } header: {
+                Text("macOS")
+            } footer: {
+                footnote("macOS decides whether notifications reach the screen. Turned off there, they are dropped without a word, whatever is switched on below.")
+            }
+            Section {
                 Toggle("Someone asks for my review", isOn: Binding(get: { model.notifyReviews }, set: { model.notifyReviews = $0 }))
                 Toggle("My pull request is approved, needs changes, or is merged or closed",
                        isOn: Binding(get: { model.notifyMyPulls }, set: { model.notifyMyPulls = $0 }))
@@ -228,6 +235,41 @@ private struct NotificationSettings: View {
                 footnote(model.jiraSettings == nil ? "Connect Jira under Integrations first." : "A click on the notification opens the ticket in GitNest View.")
             }
         }
+    }
+}
+
+/// What macOS allows, with the one button that changes it.
+private struct NotificationAccessRow: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 10) {
+            switch model.notificationAccess {
+            case .allowed:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.green)
+                Text("Notifications are on")
+                Spacer()
+                Button("Send Test Notification") { Notifier.shared.postTest() }
+            case .off:
+                Image(systemName: "bell.slash.fill").foregroundStyle(Theme.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Notifications are off for GitNest View")
+                    Text("Turn on Allow Notifications in System Settings.").font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Open System Settings…") { Notifier.openSystemSettings() }
+            case .notAsked:
+                Image(systemName: "bell.badge").foregroundStyle(Theme.orange)
+                Text("GitNest View has not asked yet")
+                Spacer()
+                Button("Allow Notifications…") { Notifier.shared.requestAccess(again: true) }
+            case .unknown:
+                ProgressView().controlSize(.small)
+                Text("Asking macOS…").foregroundStyle(.secondary)
+                Spacer()
+            }
+        }
+        .task { await Notifier.shared.refreshAccess() }
     }
 }
 

@@ -38,6 +38,7 @@ struct InboxView: View {
             .frame(height: 48)
             .background(TitleBarArea())
             HLine()
+            if model.notificationAccess == .off { NotificationsOffBar(); HLine() }
             if model.inbox.isEmpty && model.myPulls.isEmpty {
                 EmptyState("Nothing waits", symbol: "tray", message: "Review requests and your open pull requests on the connected servers appear here.")
             } else {
@@ -189,5 +190,22 @@ struct InboxView: View {
         }
         .buttonStyle(.plain)
         .hoverBackground(radius: 0)
+    }
+}
+
+/// Said where the news is: macOS throws GitNest View's notifications away.
+struct NotificationsOffBar: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "bell.slash.fill").foregroundStyle(Theme.orange)
+            Text("macOS has notifications turned off for GitNest View, so nothing here reaches you as a notification.")
+                .foregroundStyle(Theme.secondary)
+            Spacer()
+            Button("Open System Settings…") { Notifier.openSystemSettings() }.buttonStyle(ChipButtonStyle())
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Theme.orange.opacity(0.08))
+        .accessibilityIdentifier("notificationsOff")
     }
 }
