@@ -29,6 +29,7 @@ struct SearchView: View {
                 }
                 .padding(.horizontal, 10)
                 .frame(height: 32)
+                .focusesField($focused)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
                 .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(focused ? Theme.blue.opacity(0.6) : Theme.border))
                 Toggle("Aa", isOn: Binding(get: { !ignoreCase }, set: { ignoreCase = !$0 })).toggleStyle(.button).help("Match case")
@@ -41,7 +42,7 @@ struct SearchView: View {
             HLine()
             WithFilePane { content }
         }
-        .onAppear { focused = true }
+        .focusOnAppear($focused)
         // Search again when the clones come in (at launch) or change: a
         // search before they are known would find nothing.
         .task(id: cloneCount) {

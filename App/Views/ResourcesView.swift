@@ -9,6 +9,7 @@ struct ResourcesView: View {
     let repo: ForgeRepo
     @State private var items: [TFItem]?
     @State private var query = ""
+    @FocusState private var filterFocused: Bool
     @State private var kind = "all"
     @State private var usage: [ModuleUsage] = []
     @State private var latestTag: String?
@@ -55,9 +56,11 @@ struct ResourcesView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary)
                     TextField("Filter by address, source or file", text: $query).textFieldStyle(.plain)
+                        .focused($filterFocused)
                 }
                 .padding(.horizontal, 8)
                 .frame(height: 26)
+                .focusesField($filterFocused)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
                 .frame(maxWidth: 320)

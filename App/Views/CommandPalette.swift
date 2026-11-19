@@ -135,8 +135,8 @@ struct CommandPalette: View {
             query = ProcessInfo.processInfo.environment["GNV_DEV_QUERY"] ?? ""
             #endif
             cursor = 0
-            focused = true
         }
+        .focusOnAppear($focused)
         .task { await load() }
     }
 

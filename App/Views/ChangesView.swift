@@ -910,6 +910,7 @@ struct RepoFiles: View {
     let changed: [ChangedFile]
     @State private var tree: FileTree?
     @State private var query = ""
+    @FocusState private var filterFocused: Bool
     /// The open folders live in the model, per clone: they stay as they were
     /// when the tree comes back (another tab, another repo, a relaunch).
     private var state: Binding<FileTreeState> {
@@ -923,6 +924,7 @@ struct RepoFiles: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary)
                 TextField("Filter files", text: $query).textFieldStyle(.plain)
+                    .focused($filterFocused)
                 if !expanded.isEmpty, query.isEmpty {
                     Button("Collapse All", systemImage: "arrow.down.right.and.arrow.up.left") { state.wrappedValue.expanded = [] }
                         .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(Theme.tertiary).help("Collapse every folder")
@@ -930,6 +932,7 @@ struct RepoFiles: View {
             }
             .font(.system(size: 12))
             .padding(.horizontal, 8).frame(height: 26)
+            .focusesField($filterFocused)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
             .padding(8)
