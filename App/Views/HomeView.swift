@@ -41,7 +41,7 @@ struct HomeView: View {
             HLine()
             GeometryReader { space in
             // The left column keeps room for its rows; the right one for a ticket.
-            let widest = max(Self.sideRange.lowerBound, space.size.width - 32 - 14 - 380)
+            let widest = max(Self.sideRange.lowerBound, Double(space.size.width) - 32 - 14 - 380)
             let side = min(max(sideWidth, Self.sideRange.lowerBound), min(Self.sideRange.upperBound, widest))
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -68,7 +68,7 @@ struct HomeView: View {
                                 latestCard
                             }
                         }
-                        .frame(width: side)
+                        .frame(width: CGFloat(side))
                     }
                 }
                 .padding(16)
@@ -525,7 +525,7 @@ private struct ColumnDivider: View {
                     .onChanged { drag in
                         let from = start ?? shown
                         start = from
-                        width = min(max(from - drag.translation.width, range.lowerBound), range.upperBound)
+                        width = min(max(from - Double(drag.translation.width), range.lowerBound), range.upperBound)
                     }
                     .onEnded { _ in start = nil }
             )
