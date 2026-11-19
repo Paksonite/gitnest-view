@@ -861,3 +861,28 @@ struct FlowLayout: Layout {
         return rows.filter { !$0.items.isEmpty }
     }
 }
+
+/// Stands in for the hidden title bar behind a section's top bar: a double
+/// click zooms the window, as a title bar does (or minimises it, or nothing,
+/// as System Settings → Desktop & Dock says); a drag moves the window.
+struct TitleBarArea: NSViewRepresentable {
+    final class AreaView: NSView {
+        override var mouseDownCanMoveWindow: Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            guard event.clickCount == 2 else {
+                window?.performDrag(with: event)
+                return
+            }
+            switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+            case "Minimize": window?.miniaturize(nil)
+            case "None": break
+            default: window?.zoom(nil)
+            }
+        }
+    }
+
+    func makeNSView(context: Context) -> AreaView { AreaView() }
+    func updateNSView(_ view: AreaView, context: Context) {}
+}
+

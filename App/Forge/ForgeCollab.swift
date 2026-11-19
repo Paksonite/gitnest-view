@@ -94,9 +94,11 @@ struct ForgeRelease: Decodable, Identifiable, Hashable, Sendable {
     var htmlURL: String?
     var publishedAt: Date?
     var author: ForgeUser?
+    /// The release notes (Markdown).
+    var body: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, draft, prerelease, author
+        case id, name, draft, prerelease, author, body
         case tagName = "tag_name"
         case htmlURL = "html_url"
         case publishedAt = "published_at"
@@ -196,7 +198,7 @@ extension ForgejoClient {
     }
 
     func releases(_ repo: RepoSlug) async throws -> [ForgeRelease] {
-        try await get("repos/\(repo.owner)/\(repo.name)/releases", query: [.init(name: "page", value: "1"), .init(name: "limit", value: "20")])
+        try await get("repos/\(repo.owner)/\(repo.name)/releases", query: [.init(name: "page", value: "1"), .init(name: "limit", value: "50")])
     }
 
     func actionVariables(_ repo: RepoSlug) async throws -> [ActionVariable] {

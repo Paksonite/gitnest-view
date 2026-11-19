@@ -432,7 +432,7 @@ struct GitHubClient: ForgeService {
     func markRead(notification id: Int) async throws { try await api.send("PATCH", "notifications/threads/\(id)") }
 
     func releases(_ slug: RepoSlug) async throws -> [ForgeRelease] {
-        try await api.get(repo(slug) + "/releases", query: Self.page(20))
+        try await api.get(repo(slug) + "/releases", query: Self.page(50))
     }
 
     func actionVariables(_ slug: RepoSlug) async throws -> [ActionVariable] {

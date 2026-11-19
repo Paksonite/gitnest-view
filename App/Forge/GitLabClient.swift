@@ -565,13 +565,13 @@ struct GitLabClient: ForgeService {
     func markRead(notification id: Int) async throws { try await api.send("POST", "todos/\(id)/mark_as_done") }
 
     func releases(_ slug: RepoSlug) async throws -> [ForgeRelease] {
-        let items = try await json(project(slug) + "/releases", query: [.init(name: "per_page", value: "20")]) as? [[String: Any]] ?? []
+        let items = try await json(project(slug) + "/releases", query: [.init(name: "per_page", value: "50")]) as? [[String: Any]] ?? []
         return items.enumerated().compactMap { index, item in
             try? Translate.decode([
                 "id": index + 1, "tag_name": item["tag_name"] ?? "", "name": item["name"] ?? NSNull(),
                 "draft": false, "prerelease": item["upcoming_release"] ?? false,
                 "html_url": (item["_links"] as? [String: Any])?["self"] ?? NSNull(), "published_at": item["released_at"] ?? item["created_at"] ?? NSNull(),
-                "author": Self.userJSON(item["author"]),
+                "author": Self.userJSON(item["author"]), "body": item["description"] ?? NSNull(),
             ])
         }
     }

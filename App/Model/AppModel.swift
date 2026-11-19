@@ -222,6 +222,9 @@ final class AppModel {
     /// The folders open in each clone's file tree (by clone path), kept
     /// across visits and launches.
     var fileTrees: [String: FileTreeState] = [:]
+    /// Branches deleted on the server, by "clone path|branch": the pull
+    /// request they were merged in, or nil when none was (asked once).
+    var mergedPulls: [String: PullRequest?] = [:]
     private(set) var workflows: [String: [Workflow]] = [:] // by RepoSlug.key
     /// The jobs worth showing while they pass: the ones whose name contains
     /// one of these. Other jobs appear only when they fail.

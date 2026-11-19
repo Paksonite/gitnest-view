@@ -7,6 +7,7 @@ enum RepoTab: String, CaseIterable, Identifiable {
     case resources = "Resources"
     case pulls = "Pull requests"
     case actions = "Actions"
+    case releases = "Releases"
 
     var id: String { rawValue }
 
@@ -18,6 +19,7 @@ enum RepoTab: String, CaseIterable, Identifiable {
         case .resources: "square.stack.3d.up"
         case .pulls: "arrow.triangle.pull"
         case .actions: "play.circle"
+        case .releases: "shippingbox"
         }
     }
 }
@@ -148,6 +150,7 @@ struct RepoView: View {
         let state = model.forgeState(repo)
         switch tab {
         case .changes: ChangesView(repo: repo)
+        case .releases: ReleasesView(repo: repo)
         case .history: HistoryView(repo: repo)
         case .resources: ResourcesView(repo: repo)
         case .overview, .pulls:
@@ -250,6 +253,7 @@ struct RepoHeader: View {
         .padding(.leading, 16)
         .padding(.trailing, 12)
         .frame(height: 48)
+        .background(TitleBarArea())
     }
 }
 
