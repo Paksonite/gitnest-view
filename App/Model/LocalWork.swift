@@ -747,6 +747,21 @@ extension AppModel {
         return result.results
     }
 
+    /// The lines of one clone's files that hold `text` (as typed; case
+    /// ignored unless it has a capital letter), for the file browser.
+    func grep(_ text: String, in repo: ForgeRepo) async throws -> [GrepMatch] {
+        struct Params: Encodable, Sendable {
+            var paths: [String]
+            var text: String
+            var regex: Bool
+            var ignoreCase: Bool
+        }
+        guard let clone = clone(of: repo) else { return [] }
+        let result: GrepResult = try await core.call("repos.grep", Params(paths: [clone.path], text: text, regex: false, ignoreCase: text.lowercased() == text))
+        if let failed = result.results.first?.error { throw CoreClient.CoreError.rpc(code: 0, message: failed) }
+        return result.results.first?.matches ?? []
+    }
+
     /// Where other clones of the workspace use `repo` as a module source.
     func moduleUsage(of repo: ForgeRepo) async -> [ModuleUsage] {
         struct Params: Encodable, Sendable { var paths: [String] }

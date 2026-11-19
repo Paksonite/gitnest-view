@@ -148,6 +148,7 @@ struct SearchView: View {
             NSWorkspace.shared.open(URL(fileURLWithPath: path).appending(path: match.file))
             return
         }
-        model.fileTarget = FileTarget(repo: repo, file: match.file, line: match.line)
+        let text = model.searchText.trimmingCharacters(in: .whitespaces)
+        model.fileTarget = FileTarget(repo: repo, file: match.file, line: match.line, find: regex || text.isEmpty ? nil : text)
     }
 }
