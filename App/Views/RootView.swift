@@ -204,6 +204,8 @@ struct SidebarView: View {
             }
             .padding(.trailing, 14)
             .frame(height: 40)
+            // Clear of the window's buttons on the left.
+            .background(HStack(spacing: 0) { Color.clear.frame(width: 84).allowsHitTesting(false); TitleBarArea() })
             VStack(alignment: .leading, spacing: 8) {
                 WorkspaceSwitcher()
                 search

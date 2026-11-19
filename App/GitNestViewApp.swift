@@ -90,6 +90,7 @@ private struct GoMenu: View {
         tab(.resources, "4")
         tab(.pulls, "5")
         tab(.actions, "6")
+        tab(.releases, "7")
         Button("Inbox") { model.section = .inbox }.keyboardShortcut("i", modifiers: [.command, .shift])
         Divider()
         Button("Search or Run…") { model.paletteOpen = true }.keyboardShortcut("k")

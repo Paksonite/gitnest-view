@@ -282,6 +282,40 @@ final class ClickThroughTests: XCTestCase {
         XCTAssertLessThanOrEqual(end.frame.maxX, pane.maxX, "the end of the long line cannot be scrolled into view")
     }
 
+    /// Home: a branch merged and deleted on the server is finished instead
+    /// of pushed again. Needs GNV_UI_MERGED_BRANCH checked out in a clone,
+    /// its pull request merged and the branch deleted on the server.
+    func testFinishedBranchOnHome() throws {
+        guard let branch = env["GNV_UI_MERGED_BRANCH"] else { throw XCTSkip("GNV_UI_MERGED_BRANCH") }
+        button("Home", timeout: 25).click()
+        XCTAssertTrue(element(branch, timeout: 15).exists)
+        XCTAssertFalse(app.buttons["Push All"].exists, "a merged branch is offered for pushing")
+        // The cards above fill in as the server answers; then the button stays put.
+        sleep(5)
+        button("Finish…", timeout: 15).click()
+        let confirm = app.buttons.matching(NSPredicate(format: "label == 'Finish'")).firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Finish… did not ask first")
+        confirm.click()
+        _ = element("Finished \(branch)", timeout: 30)
+        XCTAssertTrue(gone(branch, timeout: 10), "the finished branch is still in Work in progress")
+    }
+
+    /// A repository's releases: the list, the notes and what each brought.
+    /// Needs GNV_UI_RELEASES_REPO with at least two releases.
+    func testReleasesTab() throws {
+        guard let repo = env["GNV_UI_RELEASES_REPO"] else { throw XCTSkip("GNV_UI_RELEASES_REPO") }
+        let window = app.windows.firstMatch
+        window.typeKey("k", modifierFlags: .command)
+        let field = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Jump'")).firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.click()
+        field.typeText(repo + "\r")
+        button("Releases", timeout: 15).click()
+        _ = element("latest", timeout: 15)
+        _ = element("Since ", timeout: 15)
+        _ = element("Copy Tag")
+    }
+
     func testMenuBarQuickAction() throws {
         _ = button("Home", timeout: 25)
         _ = element("Waiting for your review", timeout: 20)

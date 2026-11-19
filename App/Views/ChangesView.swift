@@ -615,6 +615,8 @@ private struct SyncBar: View {
     @Environment(AppModel.self) private var model
     let repo: ForgeRepo
     let clone: Repo
+    /// The pull request a branch deleted on the server was merged in.
+    @State private var merged: PullRequest?
 
     private var openPull: PullRequest? {
         model.forgeState(repo).pulls.first { $0.state == "open" && $0.head.ref == clone.branch }
@@ -637,10 +639,14 @@ private struct SyncBar: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 42)
+        .task(id: clone.upstreamGone ? clone.path + "|" + clone.branch : "") {
+            merged = clone.upstreamGone ? await model.mergedPull(of: repo) : nil
+        }
     }
 
     private var status: String {
         if clone.detached { return "" }
+        if let merged, clone.upstreamGone { return "merged in #\(merged.number)" }
         if !clone.hasUpstream { return clone.upstreamGone ? "upstream deleted" : "not on the server" }
         var parts: [String] = []
         if clone.ahead > 0 { parts.append("↑\(clone.ahead)") }
@@ -651,6 +657,12 @@ private struct SyncBar: View {
     @ViewBuilder private var action: some View {
         if clone.detached {
             EmptyView()
+        } else if let merged, clone.upstreamGone {
+            Button("Finish", systemImage: "checkmark") {
+                model.finish(WorkInProgress(branch: clone.branch, items: [(repo: repo, clone: clone)]), merged: [clone.path: merged])
+            }
+            .buttonStyle(ChipButtonStyle(prominent: true))
+            .help("\(clone.branch) is merged into \(merged.base.name): switch back to it, pull it, and delete \(clone.branch) here")
         } else if !clone.hasUpstream {
             Button("Publish", systemImage: "icloud.and.arrow.up") { Task { await model.push(repo) } }
                 .buttonStyle(ChipButtonStyle(prominent: true))

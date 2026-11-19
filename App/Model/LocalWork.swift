@@ -167,6 +167,14 @@ extension AppModel {
             var auth: GitAuth?
         }
         let branch = clone(of: repo)?.branch ?? ""
+        if !allowEmpty, let clone = clone(of: repo), clone.upstreamGone, let merged = await mergedPull(of: repo) {
+            confirm(title: "Publish \(branch) again?",
+                    message: "\(branch) was merged into \(merged.base.name) in #\(merged.number) and deleted on the server: the work on it is done. Finish it to switch back to \(merged.base.name), or publish it again to keep working on it.",
+                    button: "Publish Again") { [weak self] in
+                Task { await self?.push(repo, allowEmpty: true) }
+            }
+            return false
+        }
         if !force, !allowEmpty, let clone = clone(of: repo), !clone.hasUpstream, !clone.detached,
            await newCommits(in: clone) == 0 {
             confirm(title: "Publish empty branch \(branch)?",
@@ -615,6 +623,8 @@ extension AppModel {
         var pushed = 0
         var empty: [String] = []
         for (repo, clone) in work.items where !clone.hasUpstream || clone.ahead > 0 {
+            // Merged and deleted on the server: the work there is done, not unpushed.
+            if clone.upstreamGone, await mergedPull(of: repo) != nil { continue }
             if !allowEmpty, !clone.hasUpstream, await newCommits(in: clone) == 0 {
                 empty.append(repo.name)
                 continue
@@ -755,5 +765,80 @@ extension AppModel {
         guard let range = source.range(of: "ref=") else { return nil }
         let rest = source[range.upperBound...]
         return String(rest.prefix { $0 != "&" && $0 != "\"" })
+    }
+}
+
+// MARK: - Finished work
+
+extension AppModel {
+    /// The pull request the checked-out branch of `repo` was merged in, when
+    /// the branch is gone from the server (merging usually deletes it). Asked
+    /// once per branch; nil when it was deleted without a merge, or the
+    /// server cannot tell.
+    func mergedPull(of repo: ForgeRepo) async -> PullRequest? {
+        guard let slug = slug(repo), let clone = local[slug.key], clone.upstreamGone, !clone.detached else { return nil }
+        let key = clone.path + "|" + clone.branch
+        if let known = mergedPulls[key] { return known }
+        guard let client = client(for: slug.host),
+              let pulls = try? await client.pullRequests(slug, state: "closed", limit: 50) else { return nil }
+        let branch = clone.branch
+        let merged = pulls.first { pull in
+            pull.phase == .merged && (pull.head.name == branch || pull.head.name.hasSuffix(":" + branch))
+        }
+        mergedPulls[key] = .some(merged)
+        return merged
+    }
+
+    /// Ends the work on a merged branch: switches back to the branch it was
+    /// merged into, pulls it, and deletes the local branch (its commits are
+    /// in the merge). Uncommitted changes stop it.
+    @discardableResult
+    func finishBranch(in repo: ForgeRepo, into base: String) async -> Bool {
+        guard let slug = slug(repo), let clone = local[slug.key] else { return false }
+        let branch = clone.branch
+        if clone.changes > 0 || !clone.state.isEmpty {
+            toast("\(repo.name): \(branch) has uncommitted changes; commit or stash them first", .error)
+            return false
+        }
+        // The base as the server has it ("origin/develop"), whatever the remote is called.
+        let remote = await branches(of: repo)?.remote.first { $0.name.split(separator: "/", maxSplits: 1).last.map(String.init) == base }?.name
+        struct Delete: Encodable, Sendable {
+            var path: String
+            var name: String
+            var force: Bool
+            var remote: Bool
+            var auth: GitAuth?
+        }
+        let auth = auth(host: slug.host, forURL: clone.remote.url)
+        let ok = await change(repo) { clone in
+            try await core.run("repo.checkout", CheckoutParams(path: clone.path, name: remote ?? base, remote: remote != nil))
+            try await core.run("repo.pull", RepoParams(path: clone.path, auth: auth))
+            // Forced: a squash merge leaves the branch's own commits unmerged in git's eyes.
+            try await core.run("repo.branch.delete", Delete(path: clone.path, name: branch, force: true, remote: false, auth: nil))
+        }
+        if ok { mergedPulls[clone.path + "|" + branch] = nil }
+        return ok
+    }
+
+    /// Finishes every merged clone of a piece of work, after asking.
+    func finish(_ work: WorkInProgress, merged: [String: PullRequest]) {
+        let done = work.items.filter { merged[$0.clone.path] != nil }
+        guard !done.isEmpty else { return }
+        let names = ListFormatter.localizedString(byJoining: done.map(\.repo.name))
+        let bases = Set(done.compactMap { merged[$0.clone.path]?.base.name }).sorted().joined(separator: ", ")
+        confirm(title: "Finish \(work.branch)?",
+                message: "Its pull \(done.count == 1 ? "request is" : "requests are") merged. In \(names) the app switches back to \(bases), pulls it, and deletes \(work.branch) here.",
+                button: "Finish") { [weak self] in
+            guard let self else { return }
+            Task {
+                var finished = 0
+                for entry in done {
+                    if let base = merged[entry.clone.path]?.base.name, await self.finishBranch(in: entry.repo, into: base) { finished += 1 }
+                }
+                if finished > 0 {
+                    self.toast("Finished \(work.branch) in \(finished) \(finished == 1 ? "repository" : "repositories")")
+                }
+            }
+        }
     }
 }

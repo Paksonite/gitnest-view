@@ -1,3 +1,4 @@
+import AppKit
 import Charts
 import SwiftUI
 
@@ -8,6 +9,10 @@ struct HomeView: View {
     @State private var activity: [ActivityCommit] = []
     @State private var loaded = false
     @State private var showCommits = false
+    /// The right column's width, dragged by the line between the columns.
+    @AppStorage("homeSideWidth") private var sideWidth: Double = 400
+    /// Work branches merged and deleted on the server, by clone path.
+    @State private var merged: [String: PullRequest] = [:]
     private let days = 14
 
     var body: some View {
@@ -32,17 +37,23 @@ struct HomeView: View {
             .padding(.leading, 16)
             .padding(.trailing, 12)
             .frame(height: 48)
+            .background(TitleBarArea())
             HLine()
+            GeometryReader { space in
+            // The left column keeps room for its rows; the right one for a ticket.
+            let widest = max(Self.sideRange.lowerBound, Double(space.size.width) - 32 - 14 - 380)
+            let side = min(max(sideWidth, Self.sideRange.lowerBound), min(Self.sideRange.upperBound, widest))
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     tiles(todo)
-                    HStack(alignment: .top, spacing: 14) {
+                    HStack(alignment: .top, spacing: 0) {
                         VStack(spacing: 14) {
                             todoCard(todo)
                             workCard
                             myPullsCard
                         }
                         .frame(maxWidth: .infinity)
+                        ColumnDivider(width: $sideWidth, shown: side, range: Self.sideRange.lowerBound...widest)
                         VStack(spacing: 14) {
                             if model.jiraSettings != nil {
                                 // With Jira the tickets lead; the commits fold away below.
@@ -57,14 +68,17 @@ struct HomeView: View {
                                 latestCard
                             }
                         }
-                        .frame(width: 400)
+                        .frame(width: CGFloat(side))
                     }
                 }
                 .padding(16)
             }
+            }
         }
         .task(id: model.repos.count) { await load() }
     }
+
+    static let sideRange: ClosedRange<Double> = 300...1100
 
     private func load() async {
         activity = await model.activity(days: days)
@@ -243,12 +257,22 @@ struct HomeView: View {
                         Image(systemName: "arrow.triangle.branch").font(.system(size: 11)).foregroundStyle(Theme.secondary)
                         Text(item.branch).font(.system(size: 12.5, weight: .medium, design: .monospaced)).lineLimit(1)
                         Spacer(minLength: 4)
-                        let unpushed = item.items.contains { !$0.clone.hasUpstream || $0.clone.ahead > 0 }
+                        let done = item.items.filter { merged[$0.clone.path] != nil }
+                        let unpushed = item.items.contains { (!$0.clone.hasUpstream || $0.clone.ahead > 0) && merged[$0.clone.path] == nil }
+                        if !done.isEmpty {
+                            Badge(text: done.count == item.items.count ? "merged" : "\(done.count) merged", color: Theme.green, filled: false)
+                                .help("Merged and deleted on the server: the work on this branch is done")
+                            Button("Finish…", systemImage: "checkmark") { model.finish(item, merged: merged) }
+                                .buttonStyle(ChipButtonStyle(prominent: !unpushed))
+                                .help("Switch back to the branch it was merged into, pull it, and delete \(item.branch) here")
+                        }
                         if unpushed {
                             Button("Push All") { Task { await model.pushAll(item) } }.buttonStyle(ChipButtonStyle())
                         }
-                        Button("Pull Requests…") { model.sheet = .openPulls(branch: item.branch) }
-                            .buttonStyle(ChipButtonStyle())
+                        if done.count < item.items.count {
+                            Button("Pull Requests…") { model.sheet = .openPulls(branch: item.branch) }
+                                .buttonStyle(ChipButtonStyle())
+                        }
                     }
                     HStack(spacing: 6) {
                         ForEach(item.items, id: \.repo.id) { entry in
@@ -260,7 +284,12 @@ struct HomeView: View {
                                 HStack(spacing: 4) {
                                     Text(entry.repo.name).lineLimit(1)
                                     LocalState(repo: entry.clone)
-                                    if !entry.clone.hasUpstream {
+                                    if let pull = merged[entry.clone.path] {
+                                        Image(systemName: "checkmark.circle.fill").font(.system(size: 9)).foregroundStyle(Theme.green)
+                                            .help("Merged into \(pull.base.name) in #\(pull.number); deleted on the server")
+                                    } else if entry.clone.upstreamGone {
+                                        Image(systemName: "icloud.slash").font(.system(size: 9)).foregroundStyle(Theme.orange).help("Deleted on the server")
+                                    } else if !entry.clone.hasUpstream {
                                         Image(systemName: "icloud.slash").font(.system(size: 9)).foregroundStyle(Theme.tertiary).help("Not on the server yet")
                                     }
                                 }
@@ -276,6 +305,14 @@ struct HomeView: View {
                 }
                 .padding(.vertical, 4)
             }
+        }
+        // Which branches deleted on the server were merged: asked when one goes.
+        .task(id: work.flatMap { $0.items.filter { $0.clone.upstreamGone }.map { $0.clone.path + "|" + $0.clone.branch } }.joined(separator: ",")) {
+            var found: [String: PullRequest] = [:]
+            for entry in work.flatMap(\.items) where entry.clone.upstreamGone {
+                if let pull = await model.mergedPull(of: entry.repo) { found[entry.clone.path] = pull }
+            }
+            merged = found
         }
     }
 
@@ -454,5 +491,46 @@ private struct TodoIcon: View {
         case .repo(_, let reason): AttentionBadges(reasons: [reason])
         case .ticket: Image(systemName: "ticket.fill").font(.system(size: 10)).foregroundStyle(Theme.blue)
         }
+    }
+}
+
+/// The line between Home's columns: dragged sideways, it gives one column
+/// what it takes from the other; a double click puts it back.
+private struct ColumnDivider: View {
+    @Binding var width: Double
+    /// The width shown now (the stored one, kept within the window).
+    let shown: Double
+    let range: ClosedRange<Double>
+    @State private var start: Double?
+    @State private var hovering = false
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(width: 14)
+            .frame(minHeight: 120)
+            .overlay {
+                Capsule()
+                    .fill(start != nil ? Theme.blue : Theme.border)
+                    .frame(width: 3, height: 44)
+                    .opacity(hovering || start != nil ? 1 : 0)
+            }
+            .contentShape(Rectangle())
+            .onHover { inside in
+                hovering = inside
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { drag in
+                        let from = start ?? shown
+                        start = from
+                        width = min(max(from - Double(drag.translation.width), range.lowerBound), range.upperBound)
+                    }
+                    .onEnded { _ in start = nil }
+            )
+            .onTapGesture(count: 2) { width = 400 }
+            .help("Drag to give one column more room; double-click for the usual widths")
+            .accessibilityLabel("Column divider")
     }
 }

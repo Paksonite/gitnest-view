@@ -36,6 +36,7 @@ struct InboxView: View {
             .padding(.leading, 16)
             .padding(.trailing, 12)
             .frame(height: 48)
+            .background(TitleBarArea())
             HLine()
             if model.inbox.isEmpty && model.myPulls.isEmpty {
                 EmptyState("Nothing waits", symbol: "tray", message: "Review requests and your open pull requests on the connected servers appear here.")

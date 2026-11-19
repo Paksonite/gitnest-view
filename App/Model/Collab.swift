@@ -173,6 +173,12 @@ extension AppModel {
         return (try? await client.releases(slug)) ?? []
     }
 
+    /// The commits a release brought since the one before it, newest first.
+    func commits(of repo: ForgeRepo, from old: String, to new: String) async throws -> [PullCommit] {
+        guard let (slug, client) = target(repo) else { return [] }
+        return try await client.compare(slug, base: old, head: new).reversed()
+    }
+
     /// The names of the variables and secrets Actions has in the repository;
     /// nil when the account may not see them.
     func actionSettings(of repo: ForgeRepo) async -> (variables: [ActionVariable], secrets: [ActionSecret])? {
