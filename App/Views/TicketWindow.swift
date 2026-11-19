@@ -609,6 +609,7 @@ private struct AssigneePicker: View {
     let assign: (JiraUser?) -> Void
     @State private var open = false
     @State private var query = ""
+    @FocusState private var searchFocused: Bool
     @State private var people: [JiraUser] = []
     @State private var searching = false
 
@@ -640,6 +641,8 @@ private struct AssigneePicker: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary)
                     TextField("Search people", text: $query, prompt: Text("Name or e-mail")).textFieldStyle(.plain)
                         .accessibilityLabel("Search people")
+                        .focused($searchFocused)
+                        .focusOnAppear($searchFocused)
                     if searching { ProgressView().controlSize(.mini) }
                 }
                 .font(.system(size: 12.5))

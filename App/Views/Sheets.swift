@@ -592,7 +592,7 @@ struct NewBranchSheet: View {
                 .disabled(cleaned.isEmpty || working)
                 .keyboardShortcut(.defaultAction)
         }
-        .onAppear { focused = true }
+        .focusOnAppear($focused)
     }
 
     private func create() {
@@ -1244,9 +1244,9 @@ struct StartWorkSheet: View {
         }
         .onAppear {
             if let suggested = model.startWorkName { name = suggested; model.startWorkName = nil }
-            focused = true
             if let preselected { chosen = [preselected] }
         }
+        .focusOnAppear($focused)
     }
 }
 
@@ -1400,7 +1400,7 @@ struct NewTagSheet: View {
             .disabled(working || name.trimmingCharacters(in: .whitespaces).isEmpty)
             .keyboardShortcut(.defaultAction)
         }
-        .onAppear { focused = true }
+        .focusOnAppear($focused)
     }
 }
 

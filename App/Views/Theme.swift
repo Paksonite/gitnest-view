@@ -886,3 +886,24 @@ struct TitleBarArea: NSViewRepresentable {
     func updateNSView(_ view: AreaView, context: Context) {}
 }
 
+
+extension View {
+    /// Puts the keyboard in `field` as the view appears. Asked again a
+    /// moment later: an overlay or a popover is not in its window yet when
+    /// it appears, and the first request is lost.
+    func focusOnAppear(_ field: FocusState<Bool>.Binding) -> some View {
+        task {
+            field.wrappedValue = true
+            for wait in [60, 200] {
+                try? await Task.sleep(for: .milliseconds(wait))
+                if !field.wrappedValue { field.wrappedValue = true }
+            }
+        }
+    }
+
+    /// A search box: a click anywhere on it (the magnifier, the padding)
+    /// puts the keyboard in its field.
+    func focusesField(_ field: FocusState<Bool>.Binding) -> some View {
+        contentShape(Rectangle()).onTapGesture { field.wrappedValue = true }
+    }
+}

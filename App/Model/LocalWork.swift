@@ -53,6 +53,15 @@ extension AppModel {
         localRevision[slug.key, default: 0] += 1
     }
 
+    /// Reads a clone again after its files changed (CloneWatcher).
+    func refreshClone(atPath path: String) async {
+        guard let key = local.first(where: { $0.value.path == path })?.key else { return }
+        guard let result: ScanResult = try? await core.call("repos.status", PathsParams(paths: [path])) else { return }
+        if let fresh = result.repos.first, local[key] != fresh { local[key] = fresh }
+        // The views read the changes and diffs again even if the counts stay.
+        localRevision[key, default: 0] += 1
+    }
+
     func revision(_ repo: ForgeRepo) -> Int {
         slug(repo).flatMap { localRevision[$0.key] } ?? 0
     }

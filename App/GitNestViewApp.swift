@@ -162,6 +162,10 @@ func showAbout() {
 final class AppLifecycle: NSObject, NSApplicationDelegate {
     private var underTests: Bool { ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil }
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSWindow.keepFullScreenOnEscape()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -172,4 +176,27 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+}
+
+extension NSWindow {
+    /// Escape that no view takes ends up with the window, and a window in
+    /// full screen leaves it then. In this app Escape closes panels and
+    /// forms; full screen is left the usual way (the green button, ⌃⌘F).
+    static func keepFullScreenOnEscape() {
+        let originalSelector = #selector(NSWindow.cancelOperation(_:))
+        let replacementSelector = #selector(NSWindow.gnv_cancelOperation(_:))
+        guard let original = class_getInstanceMethod(NSWindow.self, originalSelector),
+              let replacement = class_getInstanceMethod(NSWindow.self, replacementSelector) else { return }
+        // On NSWindow only, even if it inherits the method from NSResponder.
+        if class_addMethod(NSWindow.self, originalSelector, method_getImplementation(replacement), method_getTypeEncoding(replacement)) {
+            class_replaceMethod(NSWindow.self, replacementSelector, method_getImplementation(original), method_getTypeEncoding(original))
+        } else {
+            method_exchangeImplementations(original, replacement)
+        }
+    }
+
+    @objc fileprivate func gnv_cancelOperation(_ sender: Any?) {
+        if styleMask.contains(.fullScreen) { return }
+        gnv_cancelOperation(sender) // the original, exchanged
+    }
 }

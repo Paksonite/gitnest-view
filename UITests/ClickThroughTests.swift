@@ -316,6 +316,70 @@ final class ClickThroughTests: XCTestCase {
         _ = element("Copy Tag")
     }
 
+    /// Escape closes what is open, never full screen.
+    func testEscapeKeepsFullScreen() throws {
+        let window = app.windows.firstMatch
+        _ = button("Home", timeout: 25)
+        app.menuBars.menuItems["Enter Full Screen"].click()
+        sleep(3)
+        let exit = app.menuBars.menuItems.matching(NSPredicate(format: "title BEGINSWITH 'Exit Full Screen'")).firstMatch
+        XCTAssertTrue(exit.exists, "the window did not go full screen")
+        window.typeKey(.escape, modifierFlags: [])
+        sleep(2)
+        XCTAssertTrue(exit.exists, "Escape left full screen")
+        // Escape still closes the palette there.
+        window.typeKey("k", modifierFlags: .command)
+        let field = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Jump'")).firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        window.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(gone("Jump to a repository"), "Escape did not close the palette")
+        XCTAssertTrue(exit.exists, "Escape on the palette left full screen")
+        exit.click()
+        sleep(2)
+    }
+
+    /// A search opened with a click or ⌘K takes what is typed at once;
+    /// a click on a search box's magnifier puts the keyboard in it.
+    func testSearchFieldsTakeTheKeyboard() throws {
+        let window = app.windows.firstMatch
+        let sidebarSearch = button("Search or run", timeout: 25)
+        func palette() -> XCUIElement { app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Jump'")).firstMatch }
+
+        window.typeKey("k", modifierFlags: .command)
+        XCTAssertTrue(palette().waitForExistence(timeout: 5))
+        app.typeText("netw")
+        XCTAssertEqual(palette().value as? String, "netw", "⌘K: the palette did not take the keyboard")
+        window.typeKey(.escape, modifierFlags: [])
+        _ = gone("Jump to a repository")
+
+        sidebarSearch.click()
+        XCTAssertTrue(palette().waitForExistence(timeout: 5))
+        app.typeText("dns")
+        XCTAssertEqual(palette().value as? String, "dns", "a click on Search or run: the palette did not take the keyboard")
+        window.typeKey(.escape, modifierFlags: [])
+        _ = gone("Jump to a repository")
+
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Search' AND NOT (label BEGINSWITH 'Search or')")).firstMatch.click()
+        let search = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Search every clone'")).firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        sleep(1)
+        app.typeText("zone")
+        XCTAssertEqual(search.value as? String, "zone", "Search did not take the keyboard")
+
+        if let repo = env["GNV_UI_TF_REPO"] {
+            window.typeKey("k", modifierFlags: .command)
+            XCTAssertTrue(palette().waitForExistence(timeout: 5))
+            app.typeText(repo + "\r")
+            button("Resources", timeout: 15).click()
+            let filter = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Filter by address'")).firstMatch
+            XCTAssertTrue(filter.waitForExistence(timeout: 15))
+            // The magnifier, left of the field.
+            filter.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5)).withOffset(CGVector(dx: -12, dy: 0)).click()
+            app.typeText("module")
+            XCTAssertEqual(filter.value as? String, "module", "a click on the magnifier did not put the keyboard in the filter")
+        }
+    }
+
     func testMenuBarQuickAction() throws {
         _ = button("Home", timeout: 25)
         _ = element("Waiting for your review", timeout: 20)

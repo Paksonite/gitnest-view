@@ -239,6 +239,8 @@ final class AppModel {
     private let tokens: any TokenStore
     let defaults: UserDefaults
     private var loops: [Task<Void, Never>] = []
+    /// The clones' folders, watched so a change shows at once.
+    @ObservationIgnored let watcher = CloneWatcher()
     /// Tokens already read from the store, so the Keychain is asked once per
     /// server and not on every refresh.
     private var tokenCache: [String: String] = [:]
@@ -372,8 +374,9 @@ final class AppModel {
 
     // MARK: - Lifecycle
 
-    /// Starts the background refreshes. Polling stops while the app is in the
-    /// background, so an idle window costs nothing.
+    /// Starts the background refreshes. They run while the window can be
+    /// seen, in front or not (beside the editor, on another screen), and
+    /// stop while it is hidden or minimised, so an unseen app costs nothing.
     func start() {
         guard loops.isEmpty else { return }
         Notifier.shared.start(self)
@@ -381,25 +384,28 @@ final class AppModel {
         applyAppearance()
         Updater.shared.start()
         if isSetUp { Notifier.shared.requestAccess() }
+        watcher.changed = { [weak self] path in Task { await self?.refreshClone(atPath: path) } }
+        watcher.enabled = true
+        watcher.watch(Set(local.values.map(\.path)))
         loops.append(Task { [weak self] in
             await self?.loadTokens()
             await self?.reload()
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(15))
-                guard NSApp.isActive else { continue }
+                guard Self.onScreen else { continue }
                 await self?.refreshLocal()
             }
         })
         loops.append(Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(10))
-                if NSApp.isActive { await self?.refreshSelected() }
+                if Self.onScreen { await self?.refreshSelected() }
             }
         })
         loops.append(Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(120))
-                guard NSApp.isActive else { continue }
+                guard Self.onScreen else { continue }
                 await self?.loadRepos(quiet: true)
                 await self?.refreshOverview()
             }
@@ -418,7 +424,7 @@ final class AppModel {
         loops.append(Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
-                guard let self, NSApp.isActive, self.jiraSettings != nil else { continue }
+                guard let self, Self.onScreen, self.jiraSettings != nil else { continue }
                 await self.refreshJira()
             }
         })
@@ -427,7 +433,7 @@ final class AppModel {
             try? await Task.sleep(for: .seconds(60))
             while !Task.isCancelled {
                 guard let self else { return }
-                if NSApp.isActive, self.backgroundFetch, !self.fetchingAll { await self.quietFetchAll() }
+                if Self.onScreen, self.backgroundFetch, !self.fetchingAll { await self.quietFetchAll() }
                 try? await Task.sleep(for: .seconds(600))
             }
         })
@@ -765,6 +771,13 @@ final class AppModel {
             map[slug.key] = repo
         }
         if local != map { local = map }
+        watcher.watch(Set(map.values.map(\.path)))
+    }
+
+    /// Whether the window can be seen: in front, or behind others but not
+    /// covered, minimised or hidden.
+    static var onScreen: Bool {
+        NSApp.isActive || NSApp.windows.contains { $0.canBecomeMain && $0.isVisible && !$0.isMiniaturized && $0.occlusionState.contains(.visible) }
     }
 
     /// Where a new clone goes: <working directory>/<owner>/<name>.

@@ -110,7 +110,8 @@ struct FilePane: View {
                 if let problem {
                     EmptyState("Cannot show this file", symbol: "doc.questionmark", message: problem)
                 } else if let text {
-                    CodeText(text: text, language: Syntax.language(of: target.file), focus: focus, changes: changes) { model.fileTarget = nil }
+                    CodeText(text: text, language: Syntax.language(of: target.file), focus: focus, changes: changes,
+                             onEscape: { model.fileTarget = nil }, document: "\(target.repo.id)/\(target.file)")
                 } else {
                     ProgressView().controlSize(.small)
                 }
@@ -118,9 +119,9 @@ struct FilePane: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Theme.window)
-        .task(id: target) { await load() }
-        // Reread the marks when the clone changes (a save in the editor, a commit).
-        .task(id: "\(target.file)/\(model.clone(of: target.repo)?.changes ?? -1)/\(model.clone(of: target.repo)?.lastCommit ?? 0)/\(model.activations)") {
+        // Read again when the clone changes (a save in the editor, a commit).
+        .task(id: "\(target)/\(model.revision(target.repo))") { await load() }
+        .task(id: "\(target.file)/\(model.clone(of: target.repo)?.changes ?? -1)/\(model.clone(of: target.repo)?.lastCommit ?? 0)/\(model.revision(target.repo))/\(model.activations)") {
             changes = await model.lineChanges(of: target.file, in: target.repo)
         }
         .onExitCommand { model.fileTarget = nil }
@@ -218,9 +219,13 @@ struct CodeText: NSViewRepresentable {
     var changes: LineChanges? = nil
     /// Escape pressed in the text.
     var onEscape: (() -> Void)? = nil
+    /// Which file this is: new text for the same file (saved in the editor)
+    /// keeps the place it is scrolled to.
+    var document: String? = nil
 
     final class Coordinator {
         var text: String?
+        var document: String?
         var focus: CodeFocus?
         var changes: LineChanges?
         var observer: NSObjectProtocol?
@@ -267,14 +272,29 @@ struct CodeText: NSViewRepresentable {
         (view as? CodeTextView)?.onEscape = onEscape
         let coordinator = context.coordinator
         if coordinator.text != text {
+            let sameDocument = coordinator.text != nil && document != nil && coordinator.document == document
+            let place = scroll.contentView.bounds.origin
             coordinator.text = text
-            coordinator.focus = nil
+            coordinator.document = document
             view.textStorage?.setAttributedString(Self.render(text, language: language))
             ruler.lineStarts = Syntax.lineStarts(text)
             ruler.ruleThickness = CGFloat(max(3, String(ruler.lineStarts.count).count)) * 7.5 + 18
-            // The top left: the text starts beside the numbers, not under them.
-            scroll.contentView.scroll(to: NSPoint(x: -scroll.contentView.contentInsets.left, y: -scroll.contentView.contentInsets.top))
+            if sameDocument {
+                // Saved in the editor: the marked block stays marked, the view where it was.
+                if let focus = coordinator.focus, let storage = view.textStorage, focus.line >= 1, focus.line <= ruler.lineStarts.count {
+                    let from = ruler.lineStarts[focus.line - 1]
+                    let to = focus.end < ruler.lineStarts.count ? ruler.lineStarts[focus.end] : storage.length
+                    storage.addAttribute(.backgroundColor, value: NSColor(Theme.blue).withAlphaComponent(0.09),
+                                         range: NSRange(location: from, length: max(0, min(storage.length, to) - from)))
+                }
+                scroll.contentView.scroll(to: place)
+            } else {
+                coordinator.focus = nil
+                // The top left: the text starts beside the numbers, not under them.
+                scroll.contentView.scroll(to: NSPoint(x: -scroll.contentView.contentInsets.left, y: -scroll.contentView.contentInsets.top))
+            }
             scroll.reflectScrolledClipView(scroll.contentView)
+            ruler.needsDisplay = true
         }
         if coordinator.changes != changes {
             coordinator.changes = changes
