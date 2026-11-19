@@ -5,7 +5,7 @@ import UserNotifications
 
 /// What macOS lets GitNest View show. Notifications turned off there are
 /// thrown away by the system without a word, so the app says so itself.
-enum NotificationAccess: Equatable {
+enum NotificationAccess: Equatable, Sendable {
     case unknown, allowed, notAsked, off
 }
 
@@ -50,13 +50,22 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Reads what macOS allows now.
     func refreshAccess() async {
         guard !Self.quiet else { return }
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        let access: NotificationAccess = switch settings.authorizationStatus {
-        case .authorized, .provisional: settings.alertSetting == .disabled && settings.notificationCenterSetting == .disabled ? .off : .allowed
-        case .notDetermined: .notAsked
-        default: .off
-        }
+        let access = await Self.currentAccess()
         if model?.notificationAccess != access { model?.notificationAccess = access }
+    }
+
+    /// Read off the main actor: the settings object itself may not cross over.
+    private nonisolated static func currentAccess() async -> NotificationAccess {
+        await withCheckedContinuation { done in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                let access: NotificationAccess = switch settings.authorizationStatus {
+                case .authorized, .provisional: settings.alertSetting == .disabled && settings.notificationCenterSetting == .disabled ? .off : .allowed
+                case .notDetermined: .notAsked
+                default: .off
+                }
+                done.resume(returning: access)
+            }
+        }
     }
 
     /// Asks once for permission; macOS remembers the answer. `again` asks
