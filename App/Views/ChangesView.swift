@@ -911,6 +911,10 @@ struct RepoFiles: View {
     @State private var tree: FileTree?
     @State private var query = ""
     @FocusState private var filterFocused: Bool
+    /// Looks for the text inside the files instead of in their names.
+    @AppStorage("filesSearchText") private var inText = false
+    @State private var hits: [GrepMatch]?
+    @State private var searchProblem: String?
     /// The open folders live in the model, per clone: they stay as they were
     /// when the tree comes back (another tab, another repo, a relaunch).
     private var state: Binding<FileTreeState> {
@@ -923,9 +927,20 @@ struct RepoFiles: View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary)
-                TextField("Filter files", text: $query).textFieldStyle(.plain)
+                TextField(inText ? "Search text in files" : "Filter files", text: $query).textFieldStyle(.plain)
                     .focused($filterFocused)
-                if !expanded.isEmpty, query.isEmpty {
+                Button(inText ? "Names" : "Text") {
+                    inText.toggle()
+                    filterFocused = true
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(inText ? Theme.blue : Theme.tertiary)
+                .padding(.horizontal, 6).frame(height: 18)
+                .background((inText ? Theme.blue : Theme.border).opacity(inText ? 0.14 : 0.5), in: RoundedRectangle(cornerRadius: 4))
+                .help(inText ? "Searching the text inside the files. Click to filter by file name." : "Filtering by file name. Click to search the text inside the files.")
+                .accessibilityLabel(inText ? "Search File Names" : "Search Text in Files")
+                if !expanded.isEmpty, query.isEmpty, !inText {
                     Button("Collapse All", systemImage: "arrow.down.right.and.arrow.up.left") { state.wrappedValue.expanded = [] }
                         .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(Theme.tertiary).help("Collapse every folder")
                 }
@@ -936,8 +951,10 @@ struct RepoFiles: View {
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
             .padding(8)
-            if let tree {
-                let rows = tree.rows(expanded: expanded, query: query)
+            if inText, !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                textHits
+            } else if let tree {
+                let rows = tree.rows(expanded: expanded, query: inText ? "" : query)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
                         ForEach(rows) { row in
@@ -975,6 +992,94 @@ struct RepoFiles: View {
             reveal(model.fileTarget)
         }
         .onChange(of: model.fileTarget) { reveal(model.fileTarget) }
+        .task(id: inText ? "\(clone.path)|\(query)|\(model.revision(repo))" : "") {
+            let text = query.trimmingCharacters(in: .whitespaces)
+            guard inText, !text.isEmpty else { hits = nil; searchProblem = nil; return }
+            // Typing: wait for a pause before asking git.
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            do {
+                let found = try await model.grep(text, in: repo)
+                guard !Task.isCancelled else { return }
+                hits = found
+                searchProblem = nil
+            } catch {
+                guard !Task.isCancelled else { return }
+                hits = []
+                searchProblem = error.localizedDescription
+            }
+        }
+    }
+
+    /// The lines that hold the text, under their files; a click opens the
+    /// file at that line with the find bar on the text.
+    @ViewBuilder private var textHits: some View {
+        if let hits {
+            let files = Dictionary(grouping: hits, by: \.file).sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
+            let text = query.trimmingCharacters(in: .whitespaces)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    if let searchProblem {
+                        Text(searchProblem).font(.system(size: 12)).foregroundStyle(Theme.red).padding(12)
+                    } else if hits.isEmpty {
+                        Text("No file holds “\(text)”.").font(.system(size: 12)).foregroundStyle(Theme.secondary).padding(12)
+                    } else {
+                        Text("\(hits.count == 200 ? "The first 200" : "\(hits.count)") \(hits.count == 1 ? "line" : "lines") in \(files.count) \(files.count == 1 ? "file" : "files")")
+                            .font(.system(size: 11)).foregroundStyle(Theme.tertiary).padding(.horizontal, 6).padding(.vertical, 4)
+                    }
+                    ForEach(files, id: \.key) { file, lines in
+                        HStack(spacing: 5) {
+                            Image(systemName: "doc.text").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
+                            Text(file).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.head)
+                            Spacer(minLength: 4)
+                            Text("\(lines.count)").font(.system(size: 10, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.tertiary)
+                        }
+                        .padding(.horizontal, 6).frame(height: 23)
+                        .help(file)
+                        ForEach(lines, id: \.self) { hit in hitRow(hit, text: text) }
+                    }
+                }
+                .padding(.horizontal, 6).padding(.bottom, 6)
+            }
+        } else {
+            ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func hitRow(_ hit: GrepMatch, text: String) -> some View {
+        let shown = model.fileTarget?.repo.id == repo.id && model.fileTarget?.file == hit.file && model.fileTarget?.line == hit.line
+        return Button {
+            model.fileTarget = FileTarget(repo: repo, file: hit.file, line: hit.line, find: text)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(hit.line)").font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.tertiary)
+                    .frame(minWidth: 30, alignment: .trailing)
+                Text(Self.marked(hit.text.trimmingCharacters(in: .whitespaces), text))
+                    .font(.system(size: 11.5, design: .monospaced)).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 10).padding(.trailing, 6).frame(height: 21)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverBackground(selected: shown, radius: 5)
+        .help("\(hit.file):\(hit.line)")
+    }
+
+    /// The line with the text looked for in bold.
+    static func marked(_ line: String, _ text: String) -> AttributedString {
+        var out = AttributedString(line)
+        guard !text.isEmpty else { return out }
+        let options: String.CompareOptions = text.lowercased() == text ? [.caseInsensitive] : []
+        var from = line.startIndex
+        while let found = line.range(of: text, options: options, range: from..<line.endIndex) {
+            if let low = AttributedString.Index(found.lowerBound, within: out), let high = AttributedString.Index(found.upperBound, within: out) {
+                out[low..<high].foregroundColor = Theme.orange
+                out[low..<high].font = .system(size: 11.5, weight: .bold, design: .monospaced)
+            }
+            from = found.upperBound
+        }
+        return out
     }
 
     /// Opens the folders above a file shown from elsewhere (Search, Changes).

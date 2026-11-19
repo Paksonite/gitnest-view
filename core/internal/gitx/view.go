@@ -151,7 +151,7 @@ type GrepMatch struct {
 // most max lines. fixed searches for the text as is; otherwise it is a
 // regular expression. Case is ignored when ignoreCase.
 func Grep(ctx context.Context, dir, text string, fixed, ignoreCase bool, max int) ([]GrepMatch, error) {
-	args := []string{"grep", "-n", "-I", "--no-color", "--full-name", "-e", text}
+	args := []string{"grep", "-n", "-I", "--no-color", "--full-name", "--untracked", "-e", text}
 	if fixed {
 		args = append(args[:1], append([]string{"-F"}, args[1:]...)...)
 	}

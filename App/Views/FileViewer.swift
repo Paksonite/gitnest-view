@@ -8,6 +8,8 @@ struct FileTarget: Hashable, Sendable {
     var file: String
     /// 1-based; the block that starts there is marked.
     var line: Int?
+    /// Text looked for in the files: the find bar opens with it, on that line.
+    var find: String? = nil
 }
 
 /// A list with the file pane beside it: the pane slides in from the right
@@ -54,6 +56,8 @@ struct FilePane: View {
     @State private var focus: CodeFocus?
     /// The lines that differ from the last commit.
     @State private var changes: LineChanges?
+    /// Bumped to open the find bar (⌘F or the magnifier).
+    @State private var findRequest = 0
 
     var body: some View {
         let clone = model.clone(of: target.repo)
@@ -84,6 +88,10 @@ struct FilePane: View {
                           + (model.repoTab == .changes ? "Click to show its diff." : "Click to show it in Changes."))
                     .accessibilityLabel("Show Changes")
                 }
+                Button("Find in File", systemImage: "magnifyingglass") { findRequest += 1 }
+                    .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(Theme.secondary)
+                    .keyboardShortcut("f")
+                    .help("Find text in this file (⌘F, then Return or ⌘G for the next match)")
                 Button("Copy Path", systemImage: "doc.on.doc") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(target.file, forType: .string)
@@ -111,7 +119,8 @@ struct FilePane: View {
                     EmptyState("Cannot show this file", symbol: "doc.questionmark", message: problem)
                 } else if let text {
                     CodeText(text: text, language: Syntax.language(of: target.file), focus: focus, changes: changes,
-                             onEscape: { model.fileTarget = nil }, document: "\(target.repo.id)/\(target.file)")
+                             onEscape: { model.fileTarget = nil }, document: "\(target.repo.id)/\(target.file)",
+                             findRequest: findRequest, findText: target.find, findLine: target.line)
                 } else {
                     ProgressView().controlSize(.small)
                 }
@@ -222,8 +231,15 @@ struct CodeText: NSViewRepresentable {
     /// Which file this is: new text for the same file (saved in the editor)
     /// keeps the place it is scrolled to.
     var document: String? = nil
+    /// A new value opens the find bar.
+    var findRequest = 0
+    /// Text to look for at once (from a search in the files), at findLine.
+    var findText: String? = nil
+    var findLine: Int? = nil
 
     final class Coordinator {
+        var findRequest = 0
+        var findText: String?
         var text: String?
         var document: String?
         var focus: CodeFocus?
@@ -304,6 +320,28 @@ struct CodeText: NSViewRepresentable {
             ruler.allNew = changes?.untracked == true
             ruler.needsDisplay = true
         }
+        if coordinator.findRequest != findRequest || (findText != nil && coordinator.findText != findText) {
+            coordinator.findRequest = findRequest
+            coordinator.findText = findText
+            let line = findText == nil ? nil : findLine
+            let starts = ruler.lineStarts
+            if let findText {
+                // The find bar starts with the find pasteboard, as in every Mac app.
+                let board = NSPasteboard(name: .find)
+                board.clearContents()
+                board.setString(findText, forType: .string)
+            }
+            DispatchQueue.main.async { [weak view] in
+                guard let view else { return }
+                view.window?.makeFirstResponder(view)
+                if let line, line >= 1, line <= starts.count {
+                    // From the start of that line: the next match is the one found there.
+                    view.setSelectedRange(NSRange(location: starts[line - 1], length: 0))
+                }
+                Self.finder(view, .showFindInterface)
+                if line != nil { Self.finder(view, .nextMatch) }
+            }
+        }
         guard coordinator.focus != focus else { return }
         let old = coordinator.focus
         coordinator.focus = focus
@@ -337,6 +375,13 @@ struct CodeText: NSViewRepresentable {
             }
             scroll.reflectScrolledClipView(scroll.contentView)
         }
+    }
+
+    @MainActor
+    static func finder(_ view: NSTextView, _ action: NSTextFinder.Action) {
+        let item = NSMenuItem()
+        item.tag = action.rawValue
+        view.performTextFinderAction(item)
     }
 
     @MainActor
@@ -384,6 +429,19 @@ final class CodeTextView: NSTextView {
             return
         }
         onEscape?()
+    }
+
+    /// ⌘G and ⇧⌘G go to the next and the previous match, from the text or
+    /// from the find bar's field.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let keys = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if event.charactersIgnoringModifiers?.lowercased() == "g", keys.subtracting(.shift) == .command,
+           let responder = window?.firstResponder as? NSView, let scroll = enclosingScrollView,
+           responder === self || responder.isDescendant(of: scroll) {
+            CodeText.finder(self, keys.contains(.shift) ? .previousMatch : .nextMatch)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 

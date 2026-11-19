@@ -381,6 +381,17 @@ func TestGrepAcrossRepositories(t *testing.T) {
 	if len(res.Results) != 0 {
 		t.Errorf("no match must give no results: %+v", res)
 	}
+	// A new file counts; an ignored one does not (the file tree shows the same).
+	write(t, two, ".gitignore", "out/\n")
+	if err := os.MkdirAll(filepath.Join(two, "out"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, two, "out/plan.txt", "fresh-text\n")
+	write(t, two, "new.tf", "fresh-text\n")
+	must(t, "repos.grep", map[string]any{"paths": []string{two}, "text": "fresh-text"}, &res)
+	if len(res.Results) != 1 || len(res.Results[0].Matches) != 1 || res.Results[0].Matches[0].File != "new.tf" {
+		t.Errorf("new and ignored files: %+v", res)
+	}
 }
 
 func TestBlockHistory(t *testing.T) {

@@ -316,6 +316,56 @@ final class ClickThroughTests: XCTestCase {
         _ = element("Copy Tag")
     }
 
+    /// Find in the file shown: ⌘F or the magnifier opens the find bar.
+    /// Text inside the clone's files: found from the file browser, the file
+    /// opens on that line with the find bar holding the text.
+    /// Needs a clone of GNV_UI_GREP_REPO with GNV_UI_GREP_FILE holding GNV_UI_GREP_TEXT.
+    func testFindInFile() throws {
+        guard let repo = env["GNV_UI_GREP_REPO"], let file = env["GNV_UI_GREP_FILE"], let text = env["GNV_UI_GREP_TEXT"] else {
+            throw XCTSkip("GNV_UI_GREP_REPO, GNV_UI_GREP_FILE, GNV_UI_GREP_TEXT")
+        }
+        let window = app.windows.firstMatch
+        window.typeKey("k", modifierFlags: .command)
+        let field = app.textFields.matching(NSPredicate(format: "placeholderValue BEGINSWITH 'Jump'")).firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.click()
+        field.typeText(repo + "\r")
+        button("Changes", timeout: 15).click()
+        (app.radioButtons["Files"].exists ? app.radioButtons["Files"] : button("Files", timeout: 10)).click()
+        // Names mode, whatever was used last.
+        if app.buttons["Search File Names"].waitForExistence(timeout: 3) { app.buttons["Search File Names"].click() }
+        element(file, timeout: 10).click()
+        _ = button("Find in File", timeout: 10)
+        window.typeKey("f", modifierFlags: .command)
+        let finder = app.searchFields.firstMatch
+        XCTAssertTrue(finder.waitForExistence(timeout: 5), "⌘F did not open the find bar")
+        finder.typeText(text + "\r")
+        // Escape hides the find bar; the magnifier brings it back.
+        window.typeKey(.escape, modifierFlags: [])
+        var deadline = Date().addingTimeInterval(5)
+        while finder.exists, Date() < deadline { usleep(100_000) }
+        XCTAssertFalse(finder.exists, "Escape did not hide the find bar")
+        button("Find in File").click()
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5), "the magnifier did not open the find bar")
+        window.typeKey(.escape, modifierFlags: [])
+        deadline = Date().addingTimeInterval(5)
+        while app.searchFields.firstMatch.exists, Date() < deadline { usleep(100_000) }
+
+        // The text in every file of the clone.
+        button("Search Text in Files", timeout: 10).click()
+        let search = app.textFields.matching(NSPredicate(format: "placeholderValue == 'Search text in files'")).firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5), "the field did not switch to text")
+        search.click()
+        search.typeText(text)
+        let hit = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", text)).firstMatch
+        XCTAssertTrue(hit.waitForExistence(timeout: 10), "no line with the text is listed")
+        hit.click()
+        let shown = app.searchFields.firstMatch
+        XCTAssertTrue(shown.waitForExistence(timeout: 10), "the file did not open with the find bar")
+        XCTAssertEqual((shown.value as? String)?.lowercased(), text.lowercased(), "the find bar does not hold the text")
+        button("Search File Names").click()
+    }
+
     /// Escape closes what is open, never full screen.
     func testEscapeKeepsFullScreen() throws {
         let window = app.windows.firstMatch
