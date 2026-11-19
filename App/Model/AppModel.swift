@@ -1443,8 +1443,9 @@ final class AppModel {
     }
 
     /// What a pull request from `head` into `base` would bring, with a title
-    /// and a description to start from. A release (develop into the default
-    /// branch) is titled after the tickets; a feature after its first commit.
+    /// to start from; the description is left for the author to write. A
+    /// release (develop into the default branch) is titled after the
+    /// tickets; a feature after its first commit.
     func releaseDraft(_ repo: ForgeRepo, head: String, base: String, release: Bool = true) async throws -> ReleaseDraft {
         guard let slug = slug(repo), let client = client(for: slug.host) else { throw ForgeError.notAnswer }
         let commits = try await client.compare(slug, base: base, head: head)
@@ -1452,16 +1453,13 @@ final class AppModel {
         let open = (try? await client.pullRequests(slug, state: "open")) ?? []
         let existing = open.first { $0.head.ref == head && $0.base.ref == base }
         let title: String
-        var body: String
         if release {
             title = tickets.isEmpty ? "chore: release \(head) into \(base)" : "chore: \(tickets.joined(separator: ", ")) release"
-            body = "Release \(head) → \(base)"
         } else {
             let oldestFirst = commits.sorted { ($0.commit.author?.date ?? .distantPast) < ($1.commit.author?.date ?? .distantPast) }
             title = oldestFirst.first?.subject ?? head
-            body = oldestFirst.count > 1 ? oldestFirst.map { "- \($0.subject)" }.joined(separator: "\n") : ""
         }
-        if !tickets.isEmpty { body += (body.isEmpty ? "" : "\n\n") + "Tickets: \(tickets.joined(separator: ", "))" }
+        let body = ""
         return ReleaseDraft(head: head, base: base, commits: commits, tickets: tickets, title: title, body: body, existing: existing)
     }
 

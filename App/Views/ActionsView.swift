@@ -51,16 +51,24 @@ struct ActionsView: View {
             }
             VStack(spacing: 0) {
                 if let run = current {
+                    // As on the server: the run on top, its jobs down the
+                    // left, the chosen job's steps beside them.
                     runHeader(run)
                     HLine()
-                    jobBar(run)
-                    HLine()
-                    if let target {
-                        LogPane(target: target)
-                    } else if let jobsError {
-                        EmptyState("Cannot read the jobs", symbol: "wifi.exclamationmark", message: jobsError)
-                    } else {
-                        EmptyState("Select a job to see its log", symbol: "text.alignleft")
+                    HStack(spacing: 0) {
+                        ResizableColumn(key: "jobList", initial: 250, range: 190...460) {
+                            jobList(run)
+                        }
+                        Group {
+                            if let target {
+                                LogPane(target: target, showsState: true)
+                            } else if let jobsError {
+                                EmptyState("Cannot read the jobs", symbol: "wifi.exclamationmark", message: jobsError)
+                            } else {
+                                EmptyState("Select a job to see its steps", symbol: "list.bullet.rectangle")
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 } else {
                     EmptyState("No runs", symbol: "play.circle", message: workflow == nil ? "Runs of the repository's workflows appear here." : "This workflow has not run yet.")
@@ -169,31 +177,58 @@ struct ActionsView: View {
     }
 
     private func runHeader(_ run: WorkflowRun) -> some View {
-        HStack(spacing: 8) {
-            CheckIcon(state: run.state)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(run.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                    Text("#\(run.number)").foregroundStyle(Theme.tertiary)
+        HStack(alignment: .top, spacing: 10) {
+            CheckIcon(state: run.state, size: 18).padding(.top, 1)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(run.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
+                    .textSelection(.enabled)
+                // What ran, and who or what started it.
+                HStack(spacing: 5) {
+                    if let sha = run.commitSHA {
+                        Text("Commit")
+                        Text(String(sha.prefix(10))).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Theme.blue)
+                            .textSelection(.enabled)
+                    }
+                    Text(Self.started(run))
+                    if let who = run.triggerUser?.displayName, run.trigger != "schedule" {
+                        Text(who).foregroundStyle(Theme.orange)
+                    }
+                    Text("#\(run.number)").font(.system(size: 11, weight: .medium)).monospacedDigit()
+                        .padding(.horizontal, 5).frame(height: 17)
+                        .background(Theme.border.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
+                    if let ref = run.prettyRef {
+                        Text(ref).font(.system(size: 11.5, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                    }
                 }
-                // Who, why, where, how long: the questions a red run raises.
-                HStack(spacing: 6) {
+                .font(.system(size: 12)).foregroundStyle(Theme.secondary).lineLimit(1)
+                // Which workflow; its other runs one click away.
+                HStack(spacing: 5) {
+                    Text("Workflow")
+                    if let file = run.workflowID {
+                        Text(file).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Theme.orange)
+                        Button("all runs") {
+                            workflow = file
+                            filter = .all
+                            selected = run.id
+                        }
+                        .buttonStyle(.plain).foregroundStyle(Theme.blue)
+                        .help("List only the runs of \(file)")
+                    }
+                    Text("·")
                     Text(run.state.label).foregroundStyle(run.state.color)
                     if let took = run.duration { Text(run.state.isFinished ? "in \(took)" : "for \(took)").monospacedDigit() }
-                    if !run.triggerLabel.isEmpty { Text("· \(run.triggerLabel)") }
-                    if let who = run.triggerUser?.displayName, run.trigger != "schedule" { Text("by \(who)") }
-                    if let ref = run.prettyRef { Text(ref).font(.system(size: 11.5, design: .monospaced)).lineLimit(1) }
-                    if let sha = run.commitSHA { Text(String(sha.prefix(7))).font(.system(size: 11.5, design: .monospaced)) }
+                    if let when = run.started ?? run.created { Text("· \(when.relative)") }
                 }
-                .font(.system(size: 11.5)).foregroundStyle(Theme.secondary).lineLimit(1)
+                .font(.system(size: 12)).foregroundStyle(Theme.secondary).lineLimit(1)
             }
-            Spacer()
-            if working { ProgressView().controlSize(.small) }
+            Spacer(minLength: 8)
+            if working { ProgressView().controlSize(.small).padding(.top, 4) }
             if run.state.isFinished {
-                Button("Re-run", systemImage: "arrow.clockwise") { act(.rerun, run) }
+                Button("Re-run all jobs", systemImage: "arrow.clockwise") { act(.rerun, run) }
                     .buttonStyle(ChipButtonStyle(prominent: run.state == .failure))
                     .needsWrite()
                     .disabled(working)
+                    .fixedSize()
                     .help(model.supportsRerun(model.workspace?.host) ? "Run all jobs of this run again"
                           : "Run all jobs of this run again (through the server's web pages: Forgejo before 17 has no API for it)")
             } else {
@@ -201,16 +236,30 @@ struct ActionsView: View {
                     .buttonStyle(ChipButtonStyle())
                     .needsWrite()
                     .disabled(working)
+                    .fixedSize()
             }
             if let url = run.htmlURL.flatMap(URL.init) {
                 Button("Open in Browser", systemImage: "arrow.up.right.square") { openExternal(url) }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.secondary)
+                    .padding(.top, 4)
+                    .help("Open the run on the server")
             }
         }
-        .padding(.horizontal, 12)
-        .frame(height: 46)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    /// "pushed by", "started by": the words the server uses.
+    private static func started(_ run: WorkflowRun) -> String {
+        switch run.trigger {
+        case "push": "pushed by"
+        case "pull_request", "pull_request_target": "pull request by"
+        case "schedule": "scheduled"
+        case "workflow_dispatch": "started by"
+        default: run.triggerLabel.isEmpty ? "by" : "\(run.triggerLabel) by"
+        }
     }
 
     private func act(_ action: AppModel.RunAction, _ run: WorkflowRun) {
@@ -222,31 +271,16 @@ struct ActionsView: View {
         }
     }
 
-    private func jobBar(_ run: WorkflowRun) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(jobs) { job in
-                    Button {
-                        open(job, run: run)
-                    } label: {
-                        HStack(spacing: 5) {
-                            CheckIcon(state: job.state, size: 12)
-                            Text(job.name)
-                        }
-                    }
-                    .buttonStyle(ChipButtonStyle())
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(target?.jobID == job.id ? Theme.blue : .clear))
-                    .contextMenu {
-                        Button("Re-run This Job") {
-                            Task {
-                                await model.rerun(job, of: run, in: repo)
-                                await loadJobs()
-                            }
-                        }
-                    }
+    /// The run's jobs, one under another, each with its state, its time
+    /// and a button to run it again.
+    private func jobList(_ run: WorkflowRun) -> some View {
+        ScrollView {
+            LazyVStack(spacing: 2) {
+                ForEach(jobs) { job in jobRow(job, run: run) }
+                if jobs.isEmpty, jobsError == nil {
+                    ProgressView().controlSize(.small).padding(.top, 16)
                 }
-                if jobs.isEmpty, jobsError == nil { ProgressView().controlSize(.small) }
-                if let failed = jobs.first(where: { $0.state == .failure }), jobs.count > 1 {
+                if let failed = jobs.first(where: { $0.state == .failure }), jobs.count > 1, run.state.isFinished {
                     Button("Re-run failed job", systemImage: "arrow.clockwise") {
                         Task {
                             await model.rerun(failed, of: run, in: repo)
@@ -254,17 +288,60 @@ struct ActionsView: View {
                         }
                     }
                     .buttonStyle(ChipButtonStyle())
+                    .needsWrite()
                     .help("Run \(failed.name) again")
+                    .padding(.top, 8)
                 }
             }
-            .padding(.horizontal, 12)
-            .frame(height: 44)
+            .padding(8)
+        }
+    }
+
+    private func jobRow(_ job: WorkflowJob, run: WorkflowRun) -> some View {
+        let chosen = target?.jobID == job.id
+        return HStack(spacing: 8) {
+            Button {
+                open(job, run: run)
+            } label: {
+                HStack(spacing: 8) {
+                    CheckIcon(state: job.state, size: 13)
+                    Text(job.name).font(.system(size: 12.5, weight: chosen ? .semibold : .regular)).lineLimit(2)
+                    Spacer(minLength: 4)
+                }
+                .padding(.leading, 8)
+                .frame(minHeight: 34)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if run.state.isFinished {
+                Button("Re-run This Job", systemImage: "arrow.clockwise") {
+                    Task {
+                        await model.rerun(job, of: run, in: repo)
+                        await loadJobs()
+                    }
+                }
+                .labelStyle(.iconOnly).buttonStyle(.plain).foregroundStyle(Theme.secondary)
+                .needsWrite()
+                .help("Run \(job.name) again")
+            }
+            Text(job.duration ?? "").font(.system(size: 11.5, weight: chosen ? .semibold : .regular)).monospacedDigit()
+                .foregroundStyle(Theme.secondary).frame(minWidth: 30, alignment: .trailing)
+                .padding(.trailing, 8)
+        }
+        .hoverBackground(selected: chosen)
+        .contextMenu {
+            Button("Re-run This Job") {
+                Task {
+                    await model.rerun(job, of: run, in: repo)
+                    await loadJobs()
+                }
+            }
         }
     }
 
     private func open(_ job: WorkflowJob, run: WorkflowRun) {
         guard let slug = model.slug(repo) else { return }
-        target = LogTarget(repo: slug, runID: run.id, jobID: job.id, title: "\(run.title) · \(job.name)", webURL: job.htmlURL)
+        target = LogTarget(repo: slug, runID: run.id, jobID: job.id, title: job.name, webURL: job.htmlURL)
     }
 
     private func loadJobs() async {
@@ -278,8 +355,33 @@ struct ActionsView: View {
             target = nil
         }
         do {
-            jobs = try await client.jobs(slug, run: run.id)
+            let listed = try await client.jobs(slug, run: run.id)
+            // The list keeps what is known of each job's steps (their times)
+            // from the last read: no flicker while the details come.
+            let known = Dictionary(jobs.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            jobs = listed.map { job in
+                var job = job
+                if job.steps == nil { job.steps = known[job.id]?.steps }
+                return job
+            }
             jobsError = nil
+            // Forgejo lists jobs without their steps: read them for the times.
+            let missing = listed.filter { $0.steps == nil && $0.hasStarted }
+            if !missing.isEmpty {
+                let details = await withTaskGroup(of: WorkflowJob?.self) { group in
+                    for job in missing { group.addTask { try? await client.job(slug, id: job.id) } }
+                    var found: [Int: WorkflowJob] = [:]
+                    for await job in group { if let job { found[job.id] = job } }
+                    return found
+                }
+                if jobs.first?.runID == run.id || jobs.first?.runID == nil {
+                    jobs = jobs.map { job in
+                        var job = job
+                        if let steps = details[job.id]?.steps { job.steps = steps }
+                        return job
+                    }
+                }
+            }
             // Show a log straight away: the failed job, else the key one,
             // else the only one.
             // A job that only calls another workflow has nothing to print:
