@@ -66,7 +66,9 @@ final class CloneWatcher {
 
     private func received(_ paths: [String]) {
         for path in paths {
-            if Self.ignoredParts.contains(where: path.contains) || Self.ignoredGit.contains(where: path.contains) { continue }
+            // A folder may come without its last "/" (".git/objects" itself).
+            let folder = path + "/"
+            if Self.ignoredParts.contains(where: folder.contains) || Self.ignoredGit.contains(where: folder.contains) { continue }
             // The longest watched folder that holds the path: its clone.
             guard let folder = real.keys.filter({ path == $0 || path.hasPrefix($0 + "/") }).max(by: { $0.count < $1.count }),
                   let clone = real[folder] else { continue }

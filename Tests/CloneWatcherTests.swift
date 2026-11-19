@@ -46,9 +46,11 @@ final class CloneWatcherTests: XCTestCase {
         var seen: [String] = []
         watcher.changed = { seen.append($0) }
         let one = folder.appending(path: "one").path, two = folder.appending(path: "two").path
+        // The folders made in setUp settle first: their own events are old news.
+        try await Task.sleep(for: .milliseconds(1500))
         watcher.watch([one, two])
         defer { watcher.stop() }
-        try await Task.sleep(for: .milliseconds(300))
+        try await Task.sleep(for: .milliseconds(500))
 
         // git's own objects do not count.
         try Data("x".utf8).write(to: folder.appending(path: "one/.git/objects/blob"))
