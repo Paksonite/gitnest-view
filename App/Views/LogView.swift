@@ -9,6 +9,8 @@ struct LogPane: View {
     let target: LogTarget
     /// Shows a close button when the pane is a window of its own.
     var onClose: (() -> Void)?
+    /// The job's state under its name (Success, Running for 2m), as on the server.
+    var showsState = false
     @State private var follower = LogFollower()
     @State private var full = false
     /// The view stays at the end while new lines come, as long as the reader
@@ -101,8 +103,15 @@ struct LogPane: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            CheckIcon(state: follower.state)
-            Text(target.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+            if showsState {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(target.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                    Text(follower.state.label.prefix(1).uppercased() + follower.state.label.dropFirst()).font(.system(size: 11.5)).foregroundStyle(follower.state == .failure ? Theme.red : Theme.secondary)
+                }
+            } else {
+                CheckIcon(state: follower.state)
+                Text(target.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+            }
             if follower.live { Badge(text: "Live", color: Theme.green) }
             Spacer()
             if let error = follower.error {
@@ -132,7 +141,7 @@ struct LogPane: View {
             }
         }
         .padding(.horizontal, 14)
-        .frame(height: 46)
+        .frame(height: showsState ? 54 : 46)
     }
 
     private func shown(_ lines: [LogLine]) -> [LogLine] {
@@ -193,6 +202,7 @@ private struct StepSection: View {
                         .foregroundStyle(Theme.tertiary)
                         .rotationEffect(.degrees(open ? 90 : 0))
                         .frame(width: 10)
+                        .opacity(log.step.state == .skipped && lines.isEmpty ? 0 : 1)
                     CheckIcon(state: log.step.state, size: 12)
                     Text(log.step.name)
                         .font(.system(size: 12.5, weight: .medium))

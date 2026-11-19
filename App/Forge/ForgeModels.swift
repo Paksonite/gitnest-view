@@ -347,6 +347,17 @@ struct WorkflowJob: Decodable, Identifiable, Hashable, Sendable {
     }
 
     var state: CheckState { CheckState(forge: status) }
+
+    /// From its first step's start to its last step's end (now while it runs).
+    var duration: String? {
+        guard let steps, let start = steps.compactMap(\.started).min() else { return nil }
+        let end = state.isFinished ? (steps.compactMap(\.stopped).max() ?? start) : Date.now
+        let seconds = max(0, Int(end.timeIntervalSince(start)))
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return "\(seconds / 60)m \(String(format: "%02d", seconds % 60))s" }
+        return "\(seconds / 3600)h \(String(format: "%02d", seconds % 3600 / 60))m"
+    }
+
     /// A job has a log only once a runner picked it up.
     var hasStarted: Bool { (taskID ?? 0) > 0 }
 }
