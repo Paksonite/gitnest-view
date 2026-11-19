@@ -1,6 +1,13 @@
 import AppKit
 import Foundation
+import OSLog
 import UserNotifications
+
+/// What macOS lets GitNest View show. Notifications turned off there are
+/// thrown away by the system without a word, so the app says so itself.
+enum NotificationAccess: Equatable {
+    case unknown, allowed, notAsked, off
+}
 
 /// macOS notifications: someone asks for the user's review, or a pipeline
 /// of the user's own pull request fails. A click opens the pull request.
@@ -19,19 +26,90 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         return env["XCTestConfigurationFilePath"] != nil || env["GNV_DEV_HOST"] != nil
     }()
 
+    private let log = Logger(subsystem: "pl.paksonite.gitnest-view", category: "notifications")
+
     func start(_ model: AppModel) {
         self.model = model
-        guard !Self.quiet else { return }
+        if Self.quiet {
+            // Development launches can show either state without asking macOS.
+            switch ProcessInfo.processInfo.environment["GNV_DEV_NOTIFICATIONS"] {
+            case "off": model.notificationAccess = .off
+            case "on": model.notificationAccess = .allowed
+            default: break
+            }
+            return
+        }
         UNUserNotificationCenter.current().delegate = self
+        // Back from System Settings: the switch there may have been turned.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in await Notifier.shared.refreshAccess() }
+        }
+        Task { await refreshAccess() }
     }
 
-    /// Asks once for permission; macOS remembers the answer.
-    func requestAccess() {
-        guard !asked, !Self.quiet else { return }
+    /// Reads what macOS allows now.
+    func refreshAccess() async {
+        guard !Self.quiet else { return }
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let access: NotificationAccess = switch settings.authorizationStatus {
+        case .authorized, .provisional: settings.alertSetting == .disabled && settings.notificationCenterSetting == .disabled ? .off : .allowed
+        case .notDetermined: .notAsked
+        default: .off
+        }
+        if model?.notificationAccess != access { model?.notificationAccess = access }
+    }
+
+    /// Asks once for permission; macOS remembers the answer. `again` asks
+    /// even when this launch already did (the user's button in Settings).
+    func requestAccess(again: Bool = false) {
+        guard !asked || again, !Self.quiet else { return }
         asked = true
         // The async form: macOS answers on a queue of its own, and a callback
         // made here would be bound to the main actor and stop the app there.
-        Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
+        Task {
+            do {
+                _ = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+            } catch {
+                // Turned off in System Settings: macOS refuses without asking.
+                log.error("Notifications not allowed: \(error.localizedDescription, privacy: .public)")
+            }
+            await refreshAccess()
+        }
+    }
+
+    /// System Settings → Notifications, on GitNest View's page.
+    static func openSystemSettings() {
+        let id = Bundle.main.bundleIdentifier ?? "pl.paksonite.gitnest-view"
+        let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)")
+            ?? URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
+        NSWorkspace.shared.open(url)
+    }
+
+    /// One notification now, to see that they reach the screen.
+    func postTest() {
+        let content = UNMutableNotificationContent()
+        content.title = "GitNest View"
+        content.body = "Notifications reach you: approvals, review requests, failed pipelines and Jira news will look like this."
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: "test:\(Date.now.timeIntervalSince1970)", content: content, trigger: nil)
+        if let deliver {
+            deliver(request)
+        } else if !Self.quiet {
+            add(request)
+        }
+    }
+
+    /// Hands a notification to macOS; a refusal is written to the log and
+    /// read back as the current access, so the app can say why none came.
+    private func add(_ request: UNNotificationRequest) {
+        Task {
+            do {
+                try await UNUserNotificationCenter.current().add(request)
+            } catch {
+                log.error("Notification refused: \(error.localizedDescription, privacy: .public)")
+            }
+            await refreshAccess()
+        }
     }
 
     func post(id: String, title: String, body: String, host: String, fullName: String, number: Int, url: String?) {
@@ -49,7 +127,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         if let deliver {
             deliver(request)
         } else if !Self.quiet {
-            UNUserNotificationCenter.current().add(request)
+            add(request)
         }
     }
 
@@ -66,7 +144,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         if let deliver {
             deliver(request)
         } else if !Self.quiet {
-            UNUserNotificationCenter.current().add(request)
+            add(request)
         }
     }
 

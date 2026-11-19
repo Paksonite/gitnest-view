@@ -189,6 +189,8 @@ final class AppModel {
     var lastActivation = Date.distantPast
     /// Bumped when a setting kept in UserDefaults changes, so views redraw.
     var settingsRevision = 0
+    /// Whether macOS shows GitNest View's notifications (Settings, Inbox).
+    var notificationAccess: NotificationAccess = .unknown
     var fetchingAll = false
 
     // What is on screen
