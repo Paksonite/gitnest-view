@@ -164,6 +164,8 @@ final class AppModel {
     /// Jira, when the user connected it.
     var jira = JiraState()
     var myPulls: [MyPull] = []
+    /// When the Inbox was last read.
+    var lastNews = Date.distantPast
     /// Branch protection rules by RepoSlug.key; empty when they cannot be read.
     var protections: [String: [BranchProtection]] = [:]
     /// What the server said about the base branches of pull requests, by "slug.key@branch".
@@ -1504,6 +1506,14 @@ final class AppModel {
         if inbox != sorted { inbox = sorted }
         await refreshNotifications()
         await refreshJira()
+    }
+
+    /// Drops a pull request that was just merged or closed here from the
+    /// Inbox at once; the next check reads the servers again.
+    func forgetPull(host: String, fullName: String, number: Int) {
+        let name = fullName.lowercased()
+        inbox.removeAll { $0.host == host && $0.hit.number == number && $0.hit.repository?.fullName.lowercased() == name }
+        myPulls.removeAll { $0.host == host && $0.number == number && $0.repoFullName.lowercased() == name }
     }
 
     /// Shows a pull request from the Inbox in its repository.

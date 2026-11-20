@@ -228,6 +228,17 @@ extension AppModel {
         }
     }
 
+    /// The local copy of a branch just merged and deleted on the server.
+    /// Checked out, it is finished: the app switches to `base` and pulls it.
+    func deleteMergedLocal(_ name: String, into base: String, in repo: ForgeRepo) async {
+        if let slug = slug(repo), local[slug.key]?.branch == name {
+            await finishBranch(in: repo, into: base)
+        } else {
+            // Forced: a squash merge leaves the branch's own commits unmerged in git's eyes.
+            await deleteBranch(name, force: true, in: repo)
+        }
+    }
+
     func renameBranch(_ old: String, to name: String, in repo: ForgeRepo) async {
         struct Params: Encodable, Sendable {
             var path: String
@@ -419,6 +430,8 @@ extension AppModel {
         Task { await refreshLocal() }
         // Back from the browser, where a ticket may just have moved.
         if jiraSettings != nil { Task { await refreshJira() } }
+        // Back from the browser, where a pull request may just have been merged.
+        if isSetUp, Date.now.timeIntervalSince(lastNews) > 15 { Task { await checkForNews() } }
     }
 }
 
@@ -553,7 +566,10 @@ extension AppModel {
         do {
             try await client.merge(slug, number: pull.number, style: style, deleteBranch: deleteBranch, head: pull.head.sha, title: nil)
             toast("Merged #\(pull.number) into \(pull.base.ref)")
+            // Gone from the Inbox now, not at the next check.
+            forgetPull(host: slug.host, fullName: "\(slug.owner)/\(slug.name)", number: pull.number)
             try? await Task.sleep(for: .seconds(1))
+            Task { await checkForNews() }
             await refreshForge(repo, detailed: true)
             if let merged = forgeState(repo).pulls.first(where: { $0.number == pull.number }) { await loadExtras(merged, in: repo) }
             return true

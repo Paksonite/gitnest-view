@@ -1011,6 +1011,10 @@ struct MergeSheet: View {
     let pull: PullRequest
     @State private var style = "merge"
     @State private var deleteBranch = true
+    /// The clone's branch of the same name goes too (checked out: the app
+    /// switches to the target branch and pulls it first).
+    @State private var deleteLocal = true
+    @State private var hasLocal = false
     @State private var working = false
     @State private var planning = true
 
@@ -1042,6 +1046,12 @@ struct MergeSheet: View {
             Toggle("Delete \(pull.head.ref) after merging", isOn: $deleteBranch)
                 .toggleStyle(.checkbox)
                 .disabled(pull.head.ref == "develop" || pull.head.ref == (repo.defaultBranch ?? "main"))
+            if hasLocal {
+                Toggle("Delete the local \(pull.head.ref) too", isOn: $deleteLocal)
+                    .toggleStyle(.checkbox)
+                    .disabled(!deleteBranch)
+                    .padding(.leading, 20)
+            }
             if applies {
                 Label("Merging into \(pull.base.ref) starts the Terraform apply.", systemImage: "exclamationmark.triangle")
                     .font(.system(size: 12)).foregroundStyle(Theme.yellow)
@@ -1073,7 +1083,10 @@ struct MergeSheet: View {
             Button(working ? "Merging…" : "Merge") {
                 working = true
                 Task {
-                    if await model.merge(pull, style: style, deleteBranch: deleteBranch, in: repo) { model.sheet = nil }
+                    if await model.merge(pull, style: style, deleteBranch: deleteBranch, in: repo) {
+                        model.sheet = nil
+                        if deleteBranch && deleteLocal && hasLocal { await model.deleteMergedLocal(pull.head.ref, into: pull.base.ref, in: repo) }
+                    }
                     working = false
                 }
             }
@@ -1084,6 +1097,9 @@ struct MergeSheet: View {
         .task {
             await model.loadExtras(pull, in: repo, ifOlderThan: 20)
             planning = false
+        }
+        .task {
+            hasLocal = await model.branches(of: repo)?.local.contains { $0.name == pull.head.ref } ?? false
         }
         .onAppear {
             // develop is long-lived: never delete it by default.
