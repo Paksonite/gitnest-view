@@ -192,6 +192,7 @@ extension AppModel {
     /// the very first run only remembers.
     func checkForNews() async {
         let before = myPulls
+        lastNews = .now
         await refreshInbox()
         await refreshMyPulls()
         var seen = Set(defaults.stringArray(forKey: "notified") ?? [])
