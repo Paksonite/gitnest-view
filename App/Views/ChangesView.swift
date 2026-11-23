@@ -394,7 +394,9 @@ private struct DiffPane: View {
             } else if let error {
                 EmptyState("Cannot show the changes", symbol: "exclamationmark.triangle", message: error)
             } else if let diff {
-                if diff.binary {
+                if let folder = diff.folder {
+                    folderListing(folder)
+                } else if diff.binary {
                     EmptyState("Binary file", symbol: "doc.zipper", message: "Its changes cannot be shown as text.")
                 } else if diff.hunks.allSatisfy({ $0.rows.isEmpty }) {
                     EmptyState("No changes in the text", symbol: "doc", message: file.untracked ? "The new file is empty." : "Only the file's mode or name changed.")
@@ -417,6 +419,51 @@ private struct DiffPane: View {
         }
     }
 
+    /// A new folder git shows as one entry: the files in it, each opening
+    /// in the file pane.
+    private func folderListing(_ folder: FileDiff.Folder) -> some View {
+        let base = file.path.hasSuffix("/") ? file.path : file.path + "/"
+        return VStack(alignment: .leading, spacing: 0) {
+            Label(folder.repo ? "A new folder with its own git repository (.git): this repository keeps it as one entry and does not look inside. Commit it here and only a link to that repository goes in, not its files."
+                              : "A new folder: \(folder.files.count) \(folder.files.count == 1 ? "file" : "files") in it.",
+                  systemImage: folder.repo ? "exclamationmark.triangle" : "folder.badge.plus")
+                .font(.system(size: 12)).foregroundStyle(folder.repo ? Theme.orange : Theme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(12)
+            HLine()
+            if folder.files.isEmpty {
+                EmptyState("No files", symbol: "folder", message: "The folder holds no files.")
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(folder.files, id: \.self) { path in
+                            Button {
+                                model.fileTarget = FileTarget(repo: repo, file: path, line: nil)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "doc").font(.system(size: 11)).foregroundStyle(Theme.green)
+                                    Text(path.hasPrefix(base) ? String(path.dropFirst(base.count)) : path)
+                                        .font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 12).frame(height: 26).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .hoverBackground(radius: 5)
+                            .help("Show \(path)")
+                        }
+                        if folder.cut {
+                            Text("Only the first \(folder.files.count) files are listed.")
+                                .font(.system(size: 11.5)).foregroundStyle(Theme.secondary).padding(12)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "doc.text").foregroundStyle(Theme.secondary)
@@ -424,11 +471,11 @@ private struct DiffPane: View {
             if hasBothSides {
                 Segments(options: [(false, "Unstaged"), (true, "Staged")], selection: Binding(get: { staged }, set: { switchSide($0) }))
             } else {
-                Text(staged ? "staged" : file.untracked ? "new file" : "not staged").font(.system(size: 11.5)).foregroundStyle(Theme.tertiary)
+                Text(staged ? "staged" : file.untracked ? (diff?.folder != nil ? "new folder" : "new file") : "not staged").font(.system(size: 11.5)).foregroundStyle(Theme.tertiary)
             }
             Spacer()
             // A deleted file has nothing left to read.
-            if !file.conflict, !file.code.contains("D") {
+            if !file.conflict, !file.code.contains("D"), diff?.folder == nil {
                 let open = model.fileTarget?.repo.id == repo.id && model.fileTarget?.file == file.path
                 Button(open ? "Hide File" : "View File", systemImage: open ? "sidebar.right" : "doc.text.magnifyingglass") {
                     if open {
@@ -454,7 +501,8 @@ private struct DiffPane: View {
                     .buttonStyle(ChipButtonStyle(prominent: true))
                     .help("Space stages or unstages the chosen file; ⇧-click chooses a range of lines")
             } else if !file.conflict {
-                Button(staged ? "Unstage File" : "Stage File", systemImage: staged ? "minus" : "plus") {
+                let noun = diff?.folder != nil ? "Folder" : "File"
+                Button(staged ? "Unstage \(noun)" : "Stage \(noun)", systemImage: staged ? "minus" : "plus") {
                     Task {
                         if staged { await model.unstage([file], in: repo) } else { await model.stage([file], in: repo) }
                     }

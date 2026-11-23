@@ -124,6 +124,22 @@ func TestStagingAndCommit(t *testing.T) {
 	if len(nd.Hunks) != 1 || len(nd.Hunks[0].Lines) != 2 || nd.Hunks[0].Lines[1].Text != "world" {
 		t.Fatalf("untracked diff: %+v", nd)
 	}
+	// A new folder with its own repository: git lists it as one entry, the
+	// diff says what is in it.
+	if err := os.MkdirAll(dir+"/vendor/mod/sub", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "vendor/mod/main.tf", "x\n")
+	write(t, dir, "vendor/mod/sub/vars.tf", "y\n")
+	git(t, dir+"/vendor/mod", "init", "-q")
+	var fd FileDiff
+	must(t, "repo.diff", map[string]any{"path": dir, "file": map[string]any{"path": "vendor/mod/", "untracked": true, "code": "??"}}, &fd)
+	if fd.Folder == nil || !fd.Folder.Repo || strings.Join(fd.Folder.Files, ",") != "vendor/mod/main.tf,vendor/mod/sub/vars.tf" {
+		t.Fatalf("folder diff: %+v %+v", fd, fd.Folder)
+	}
+	if err := os.RemoveAll(dir + "/vendor"); err != nil {
+		t.Fatal(err)
+	}
 	must(t, "repo.stage", map[string]any{"path": dir, "files": []string{"new.txt"}}, nil)
 	if _, err := call(t, "repo.commit", map[string]any{"path": dir, "message": "  \n"}); err == nil {
 		t.Error("an empty message must be refused")

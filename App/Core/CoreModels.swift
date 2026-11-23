@@ -258,12 +258,21 @@ struct FileDiff: Decodable, Hashable, Sendable {
         var rows: [Line] { lines ?? [] }
     }
 
+    /// What a new folder git lists as one entry holds (one with its own
+    /// repository inside): paths from the clone's root.
+    struct Folder: Decodable, Hashable, Sendable {
+        var files: [String]
+        var repo: Bool
+        var cut: Bool
+    }
+
     var path: String
     var staged: Bool
     var hunks: [Hunk]
     var binary: Bool
     var truncated: Bool
     var digest: String
+    var folder: Folder?
 }
 
 /// One line of a diff, by position, as the engine's line staging takes it.
