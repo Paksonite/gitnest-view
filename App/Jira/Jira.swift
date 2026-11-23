@@ -232,6 +232,10 @@ extension AppModel {
             // News is judged on the open tickets assigned to the user, whatever the card shows.
             let assigned = settings.filter == nil ? state.issues : ((try? await client.myIssues()) ?? [])
             await announceJira(assigned, client: client)
+        } catch where error.isCancellation {
+            // Not an answer from Jira: the read was stopped (the Inbox closed
+            // before it finished). Keep what the card shows.
+            return
         } catch {
             state.error = error.localizedDescription
         }

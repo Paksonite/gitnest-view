@@ -1050,7 +1050,7 @@ final class AppModel {
                 state.runs = (fresh + state.runs.filter { !ids.contains($0.id) }).sorted { $0.id > $1.id }
             }
             state.error = nil
-        } catch is CancellationError {
+        } catch where error.isCancellation {
             return
         } catch {
             state.error = error.localizedDescription
@@ -1609,5 +1609,15 @@ extension AppModel {
             toast(error.localizedDescription, .error)
             return false
         }
+    }
+}
+
+extension Error {
+    /// A read that was stopped, not one that failed: a task cancelled
+    /// mid-request throws either, and neither is worth showing.
+    var isCancellation: Bool {
+        if self is CancellationError { return true }
+        if let error = self as? URLError, error.code == .cancelled { return true }
+        return false
     }
 }

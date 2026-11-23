@@ -50,7 +50,8 @@ struct InboxView: View {
                 }
             }
         }
-        .task { await model.checkForNews() }
+        // Not tied to the view: leaving the Inbox must not stop the reads halfway.
+        .task { Task { await model.checkForNews() } }
     }
 
     /// All connected servers, or one of them.
