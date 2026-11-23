@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -50,9 +51,53 @@ type FileDiff struct {
 	// Digest identifies the diff the app saw; line staging refuses to apply
 	// to a diff that changed meanwhile.
 	Digest string `json:"digest"`
+	// Folder is set for a new folder git lists as one entry (one with its
+	// own repository inside): what is in it, since there is no text to show.
+	Folder *NewFolder `json:"folder,omitempty"`
+}
+
+// NewFolder is what a new folder holds, paths relative to the clone.
+type NewFolder struct {
+	Files []string `json:"files"`
+	// Repo: it holds its own .git, which is why git does not look inside.
+	Repo bool `json:"repo"`
+	Cut  bool `json:"cut"`
 }
 
 const maxDiffLines = 6000
+
+// maxFolderFiles caps the listing of a new folder.
+const maxFolderFiles = 500
+
+// newFolder lists the files under path (relative to dir), leaving out
+// .git folders.
+func newFolder(dir, path string) *NewFolder {
+	out := &NewFolder{Files: []string{}}
+	root := filepath.Join(dir, path)
+	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
+		out.Repo = true
+	}
+	_ = filepath.WalkDir(root, func(p string, e fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if e.IsDir() {
+			if e.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if len(out.Files) >= maxFolderFiles {
+			out.Cut = true
+			return filepath.SkipAll
+		}
+		if rel, err := filepath.Rel(dir, p); err == nil {
+			out.Files = append(out.Files, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	return out
+}
 
 func digestOf(d gitx.Diff) string {
 	h := sha256.New()
@@ -125,6 +170,7 @@ func untrackedDiff(dir, path string) (FileDiff, error) {
 	}
 	out := FileDiff{Path: path, Hunks: []DiffHunk{}}
 	if info.IsDir() {
+		out.Folder = newFolder(dir, path)
 		return out, nil
 	}
 	const limit = 2 << 20
