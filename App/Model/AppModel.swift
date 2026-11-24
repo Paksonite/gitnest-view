@@ -345,7 +345,7 @@ final class AppModel {
 
     /// The tab a repository opens on, by its name; nil for the default.
     var initialTab: String?
-    /// Development only (`GNV_DEV_OPEN`): "log", "workspace", "branch", "clone", "pull", "pullall", "file" or "files"
+    /// Development only (`GNV_DEV_OPEN`): "log", "workspace", "branch", "clone", "pull", "pullall", "startwork", "file" or "files"
     /// opens that piece of interface at launch, to look at it.
     var initialOpen: String?
     /// Development only (`GNV_DEV_REPO`): the repository selected at launch.

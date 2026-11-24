@@ -129,6 +129,11 @@ struct RootView: View {
             try? await Task.sleep(for: .seconds(4))
             model.sheet = .pullAll
         }
+        if model.initialOpen == "startwork" {
+            try? await Task.sleep(for: .seconds(4))
+            model.startWorkName = "INFRA-99 picker check"
+            model.sheet = .startWork(preselected: model.selection)
+        }
         #endif
     }
 

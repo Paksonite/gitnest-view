@@ -594,6 +594,21 @@ extension AppModel {
 
 // MARK: - Work across repositories
 
+/// Where new work branches off.
+enum StartBase: Hashable, Sendable {
+    /// Each repository's main (default) branch on the server.
+    case main
+    /// A branch of that name on the server.
+    case branch(String)
+    /// What each clone has checked out, uncommitted changes included.
+    case checkedOut
+}
+
+extension LocalBranch {
+    /// A remote branch's name without the remote: "origin/develop" → "develop".
+    var serverName: String { name.split(separator: "/", maxSplits: 1).last.map(String.init) ?? name }
+}
+
 /// A branch checked out in one or more clones: a piece of work that may
 /// span repositories (IAM here, resources there).
 struct WorkInProgress: Identifiable, Sendable {
@@ -616,9 +631,9 @@ extension AppModel {
             .sorted { a, b in a.items.count != b.items.count ? a.items.count > b.items.count : a.branch < b.branch }
     }
 
-    /// Creates `branch` in each repository, from the server's develop (or
-    /// default branch) when `fromServer`, else from what is checked out.
-    func startWork(_ branch: String, in chosen: [ForgeRepo], fromServer: Bool) async {
+    /// Creates `branch` in each repository, from the chosen branch on the
+    /// server (fetched first) or from what is checked out.
+    func startWork(_ branch: String, in chosen: [ForgeRepo], from start: StartBase) async {
         struct Params: Encodable, Sendable {
             var path: String
             var name: String
@@ -626,11 +641,22 @@ extension AppModel {
         }
         var done: [String] = []
         var failed: [String] = []
+        var missing: [String] = []
         for repo in chosen {
             var base = ""
-            if fromServer {
+            switch start {
+            case .checkedOut:
+                break
+            case .main:
                 await run(.fetch, on: repo)
-                base = "origin/" + (await defaultBase(for: branch, in: repo))
+                base = "origin/" + (repo.defaultBranch ?? "main")
+            case .branch(let name):
+                await run(.fetch, on: repo)
+                guard let list = await branches(of: repo), list.remote.contains(where: { $0.serverName == name }) else {
+                    missing.append(repo.name)
+                    continue
+                }
+                base = "origin/" + name
             }
             let ok = await change(repo) { clone in
                 try await core.run("repo.branch.create", Params(path: clone.path, name: branch, base: base))
@@ -641,6 +667,9 @@ extension AppModel {
             toast("Created \(branch) in \(done.count == 1 ? done[0] : "\(done.count) repositories")")
         }
         if !failed.isEmpty { toast("Not created in \(failed.joined(separator: ", "))", .error) }
+        if case .branch(let name) = start, !missing.isEmpty {
+            toast("Not created in \(missing.joined(separator: ", ")): the server has no \(name) there", .error)
+        }
     }
 
     /// Pushes the branch in every clone that has something to push.

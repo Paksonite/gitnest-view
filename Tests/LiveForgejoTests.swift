@@ -324,7 +324,7 @@ final class LiveForgejoTests: XCTestCase {
         for repo in chosen { await model.clone(repo) }
 
         let branch = "test/multi-\(Int(Date().timeIntervalSince1970))"
-        await model.startWork(branch, in: chosen, fromServer: true)
+        await model.startWork(branch, in: chosen, from: .main)
         for repo in chosen {
             let clone = try XCTUnwrap(model.clone(of: repo))
             XCTAssertEqual(clone.branch, branch)

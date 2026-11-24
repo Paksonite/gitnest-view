@@ -1188,7 +1188,9 @@ struct StartWorkSheet: View {
     let preselected: ForgeRepo.ID?
     @State private var name = ""
     @State private var chosen: Set<ForgeRepo.ID> = []
-    @State private var fromServer = true
+    @State private var start: StartBase = .main
+    /// The branches each chosen repository has on the server.
+    @State private var serverBranches: [ForgeRepo.ID: Set<String>] = [:]
     @State private var working = false
     @FocusState private var focused: Bool
 
@@ -1206,9 +1208,9 @@ struct StartWorkSheet: View {
                 TextField("INFRA-99 short description", text: $name).font(.system(size: 12.5, design: .monospaced)).fieldBox()
                     .focused($focused)
             }
-            Toggle("Start from the server's develop (or default branch), fetched first", isOn: $fromServer)
-                .toggleStyle(.checkbox)
-                .font(.system(size: 12.5))
+            Field(label: "From", hint: startHint) {
+                startPicker
+            }
             Field(label: "Repositories · \(chosen.count) chosen") {
                 ScrollView {
                     VStack(spacing: 0) {
@@ -1249,7 +1251,7 @@ struct StartWorkSheet: View {
                 working = true
                 let repos = cloned.filter { chosen.contains($0.id) }
                 Task {
-                    await model.startWork(branch, in: repos, fromServer: fromServer)
+                    await model.startWork(branch, in: repos, from: start)
                     working = false
                     model.sheet = nil
                 }
@@ -1262,7 +1264,93 @@ struct StartWorkSheet: View {
             if let suggested = model.startWorkName { name = suggested; model.startWorkName = nil }
             if let preselected { chosen = [preselected] }
         }
+        .task(id: chosen) {
+            for repo in cloned where chosen.contains(repo.id) && serverBranches[repo.id] == nil {
+                let names = await model.branches(of: repo)?.remote.map(\.serverName).filter { $0 != "HEAD" } ?? []
+                serverBranches[repo.id] = Set(names)
+            }
+        }
         .focusOnAppear($focused)
+    }
+
+    private var chosenRepos: [ForgeRepo] { cloned.filter { chosen.contains($0.id) } }
+
+    /// The chosen repositories' main branches: one name, or several.
+    private var mains: [String] {
+        Array(Set(chosenRepos.map { $0.defaultBranch ?? "main" })).sorted()
+    }
+
+    /// The other branches the chosen repositories have on the server, with
+    /// how many of them have each.
+    private var otherBranches: [(name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for repo in chosenRepos {
+            let main = repo.defaultBranch ?? "main"
+            for name in serverBranches[repo.id] ?? [] where name != main { counts[name, default: 0] += 1 }
+        }
+        return counts.map { (name: $0.key, count: $0.value) }
+            .sorted { a, b in a.count != b.count ? a.count > b.count : a.name.localizedStandardCompare(b.name) == .orderedAscending }
+    }
+
+    private var startTitle: String {
+        switch start {
+        case .main: mains.count == 1 ? mains[0] : "Main branch"
+        case .branch(let name): name
+        case .checkedOut: "What is checked out"
+        }
+    }
+
+    private var startHint: String {
+        switch start {
+        case .main:
+            return mains.count > 1 ? "Each repository's main branch (\(mains.joined(separator: ", "))) on the server, fetched first."
+                            : "The main branch on the server, fetched first."
+        case .branch(let name):
+            let have = chosenRepos.filter { serverBranches[$0.id]?.contains(name) ?? true }.count
+            return have < chosenRepos.count ? "Only \(have) of the \(chosenRepos.count) repositories have \(name) on the server; the others are skipped."
+                                     : "\(name) on the server, fetched first."
+        case .checkedOut:
+            return "Each clone's current branch, uncommitted changes included."
+        }
+    }
+
+    private var startPicker: some View {
+        Dropdown(id: "start-work-base", width: 320) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch").font(.system(size: 10.5)).foregroundStyle(Theme.secondary)
+                Text(startTitle)
+                    .font(.system(size: 12.5, design: start == .checkedOut ? .default : .monospaced)).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.secondary)
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 30)
+            .frame(maxWidth: .infinity)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.border))
+        } content: {
+            ScrollView {
+                VStack(spacing: 0) {
+                    DropdownItem(title: mains.count == 1 ? mains[0] : "Main branch", symbol: "arrow.triangle.branch",
+                                 detail: mains.count == 1 ? "main branch" : mains.joined(separator: ", "),
+                                 checked: start == .main, monospaced: mains.count == 1) { start = .main }
+                    let others = otherBranches
+                    if !others.isEmpty {
+                        DropdownDivider()
+                        ForEach(others, id: \.name) { other in
+                            DropdownItem(title: other.name, symbol: "arrow.triangle.branch",
+                                         detail: other.count < chosenRepos.count ? "\(other.count) of \(chosenRepos.count)" : nil,
+                                         checked: start == .branch(other.name), monospaced: true) { start = .branch(other.name) }
+                        }
+                    }
+                    DropdownDivider()
+                    DropdownItem(title: "What is checked out", symbol: "checkmark.circle", checked: start == .checkedOut) { start = .checkedOut }
+                }
+            }
+            .frame(maxHeight: 320)
+        }
+        .help("The branch the new one starts from")
+        .accessibilityLabel("Start from: \(startTitle)")
     }
 }
 
