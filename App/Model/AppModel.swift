@@ -101,6 +101,8 @@ enum AppSheet: Hashable, Sendable {
     case review(ForgeRepo, PullRequest)
     case merge(ForgeRepo, PullRequest)
     case editPull(ForgeRepo, PullRequest)
+    /// A release on the server: a tag with notes.
+    case newRelease(ForgeRepo)
     /// What waits on develop in every repository of the workspace.
     case releases
     /// Signing in to a server's web pages, for what its API cannot do.
@@ -202,6 +204,8 @@ final class AppModel {
     var filter = ""
     var logTarget: LogTarget?
     var sheet: AppSheet?
+    /// Grows when a release is published here: the Releases tab reads them again.
+    var releasesRevision = 0
     var repoTab: RepoTab = .overview
     /// A file the Changes tab should show when it opens (from the file pane).
     var changesFocus: String?
@@ -348,7 +352,7 @@ final class AppModel {
 
     /// The tab a repository opens on, by its name; nil for the default.
     var initialTab: String?
-    /// Development only (`GNV_DEV_OPEN`): "log", "workspace", "branch", "clone", "pull", "pullall", "startwork", "file" or "files"
+    /// Development only (`GNV_DEV_OPEN`): "log", "workspace", "branch", "clone", "pull", "pullall", "startwork", "newrelease", "file" or "files"
     /// opens that piece of interface at launch, to look at it.
     var initialOpen: String?
     /// Development only (`GNV_DEV_REPO`): the repository selected at launch.

@@ -27,6 +27,7 @@ struct SheetLayer: View {
                         case .review(let repo, let pull): ReviewSheet(repo: repo, pull: pull)
                         case .merge(let repo, let pull): MergeSheet(repo: repo, pull: pull)
                         case .editPull(let repo, let pull): EditPullSheet(repo: repo, pull: pull)
+                        case .newRelease(let repo): NewReleaseSheet(repo: repo)
                         case .releases: ReleasesSheet()
                         case .webSignIn(let host): WebSignInSheet(host: host)
                         }
@@ -1719,5 +1720,114 @@ struct WebSignInSheet: View {
             }
             .buttonStyle(ChipButtonStyle())
         }
+    }
+}
+
+// MARK: - A release on the server
+
+/// A release: a version tag on a branch, with notes. The server makes the
+/// tag; the notes start as the commits since the last release.
+struct NewReleaseSheet: View {
+    @Environment(AppModel.self) private var model
+    let repo: ForgeRepo
+    @State private var tag = ""
+    @State private var target = ""
+    @State private var title = ""
+    @State private var notes = ""
+    @State private var draft = false
+    @State private var prerelease = false
+    @State private var branches: [String] = []
+    @State private var existing: [ForgeRelease] = []
+    @State private var notesFor = ""
+    @State private var writing = false
+    @State private var working = false
+    @FocusState private var focused: Bool
+
+    private var trimmedTag: String { tag.trimmingCharacters(in: .whitespaces) }
+    /// The release the notes count from: the newest one that is out.
+    private var previous: ForgeRelease? { existing.first { $0.draft != true } }
+    private var taken: Bool { existing.contains { $0.tagName == trimmedTag } }
+    private var gitLab: Bool { model.kind(of: model.slug(repo)?.host) == .gitlab }
+
+    var body: some View {
+        SheetFrame(title: "New release of \(repo.name)", symbol: "shippingbox") {
+            HStack(alignment: .top, spacing: 12) {
+                Field(label: "Tag", hint: taken ? "\(trimmedTag) is already a release." : previous.map { "The last one is \($0.tagName)." } ?? "The first release.") {
+                    TextField("v1.0.0", text: $tag).font(.system(size: 12.5, design: .monospaced)).fieldBox().focused($focused)
+                }
+                Field(label: "From", hint: "The tag is made on this branch when it is new.") {
+                    BranchPicker(id: "release-target", name: "From", branches: branches, selection: $target, other: "")
+                }
+            }
+            Field(label: "Title") { TextField(trimmedTag.isEmpty ? "Title" : trimmedTag, text: $title).fieldBox() }
+            Field(label: "Notes", hint: previous.map { "Written from the commits since \($0.tagName); change them as you like." } ?? "") {
+                TextEditor(text: $notes)
+                    .font(.system(size: 12.5, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .frame(height: 200)
+                    .padding(5)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.border))
+                    .overlay(alignment: .topTrailing) {
+                        if writing { ProgressView().controlSize(.small).padding(8) }
+                    }
+            }
+            if !gitLab {
+                HStack(spacing: 16) {
+                    Toggle("Draft (not published yet)", isOn: $draft).toggleStyle(.checkbox)
+                    Toggle("Pre-release", isOn: $prerelease).toggleStyle(.checkbox)
+                }
+                .font(.system(size: 12.5))
+            }
+        } actions: {
+            if previous != nil {
+                Button("Write Notes Again", systemImage: "arrow.clockwise") { Task { await writeNotes(force: true) } }
+                    .buttonStyle(ChipButtonStyle())
+                    .disabled(writing || target.isEmpty)
+                    .help("Notes from the commits between \(previous?.tagName ?? "") and \(target)")
+            }
+            Spacer()
+            Button("Cancel") { model.sheet = nil }.buttonStyle(ChipButtonStyle())
+            Button(working ? "Publishing…" : draft ? "Save Draft" : "Publish Release") {
+                working = true
+                Task {
+                    if await model.publishRelease(repo, tag: trimmedTag, target: target, name: title.trimmingCharacters(in: .whitespaces),
+                                                  notes: notes, draft: draft && !gitLab, prerelease: prerelease && !gitLab) {
+                        model.sheet = nil
+                    }
+                    working = false
+                }
+            }
+            .buttonStyle(ChipButtonStyle(prominent: true))
+            .disabled(working || trimmedTag.isEmpty || trimmedTag.contains(" ") || taken || target.isEmpty)
+            .keyboardShortcut(.return, modifiers: .command)
+            .help("⌘↩")
+            .needsWrite()
+        }
+        .focusOnAppear($focused)
+        .task {
+            target = repo.defaultBranch ?? "main"
+            async let found = model.releases(of: repo)
+            async let names = model.serverBranches(repo)
+            existing = await found
+            if tag.isEmpty { tag = AppModel.nextVersion(after: previous?.tagName) }
+            branches = await names
+            if !branches.isEmpty, !branches.contains(target) { target = branches[0] }
+            await writeNotes(force: false)
+        }
+        .onChange(of: target) { Task { await writeNotes(force: false) } }
+    }
+
+    /// Fills the notes from the commits since the last release, unless
+    /// someone has written in them since they were filled.
+    private func writeNotes(force: Bool) async {
+        guard let previous, !target.isEmpty else { return }
+        guard force || notes.isEmpty || notes == notesFor else { return }
+        writing = true
+        defer { writing = false }
+        guard let commits = try? await model.commits(of: repo, from: previous.tagName, to: target) else { return }
+        let fresh = AppModel.releaseNotes(commits)
+        notes = fresh
+        notesFor = fresh
     }
 }

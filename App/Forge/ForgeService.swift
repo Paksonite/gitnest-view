@@ -128,6 +128,8 @@ protocol ForgeService: Sendable {
     func notifications() async throws -> [ForgeNotification]
     func markRead(notification id: Int) async throws
     func releases(_ repo: RepoSlug) async throws -> [ForgeRelease]
+    /// Publishes a release; the server makes the tag on `target` when it is new.
+    func createRelease(_ repo: RepoSlug, tag: String, target: String, name: String, notes: String, draft: Bool, prerelease: Bool) async throws
     func actionVariables(_ repo: RepoSlug) async throws -> [ActionVariable]
     func actionSecrets(_ repo: RepoSlug) async throws -> [ActionSecret]
 

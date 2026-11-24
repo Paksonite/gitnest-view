@@ -435,6 +435,12 @@ struct GitHubClient: ForgeService {
         try await api.get(repo(slug) + "/releases", query: Self.page(50))
     }
 
+    func createRelease(_ slug: RepoSlug, tag: String, target: String, name: String, notes: String, draft: Bool, prerelease: Bool) async throws {
+        try await api.send("POST", repo(slug) + "/releases", json: [
+            "tag_name": tag, "target_commitish": target, "name": name, "body": notes, "draft": draft, "prerelease": prerelease,
+        ])
+    }
+
     func actionVariables(_ slug: RepoSlug) async throws -> [ActionVariable] {
         let root = try await json(repo(slug) + "/actions/variables", query: Self.page(100)) as? [String: Any]
         return (root?["variables"] as? [[String: Any]] ?? []).compactMap { item in

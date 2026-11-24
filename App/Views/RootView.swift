@@ -134,6 +134,10 @@ struct RootView: View {
             model.startWorkName = "INFRA-99 picker check"
             model.sheet = .startWork(preselected: model.selection)
         }
+        if model.initialOpen == "newrelease" {
+            try? await Task.sleep(for: .seconds(4))
+            if let repo = model.selectedRepo { model.sheet = .newRelease(repo) }
+        }
         #endif
     }
 

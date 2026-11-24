@@ -48,10 +48,22 @@ struct TerraformPlan: Hashable, Sendable {
         for (ending, action) in endings {
             guard let range = text.range(of: ending) else { continue }
             let address = text[text.index(text.startIndex, offsetBy: 2)..<range.lowerBound]
-            guard !address.isEmpty, !address.contains(" ") else { continue }
+            guard !address.isEmpty, !Self.spaceOutsideQuotes(address) else { continue }
             return Change(action: action, address: String(address))
         }
         return nil
+    }
+
+    /// A space outside quotes means prose, not an address: keys may hold
+    /// spaces (`alerts["VPN - connection blocked"]`), addresses may not.
+    private static func spaceOutsideQuotes(_ text: Substring) -> Bool {
+        var quoted = false, escaped = false
+        for character in text {
+            if escaped { escaped = false; continue }
+            if character == "\\" { escaped = quoted; continue }
+            if character == "\"" { quoted.toggle() } else if character == " ", !quoted { return true }
+        }
+        return false
     }
 
     /// The numbers before each of `words` in "Plan: 1 to add, 0 to change, 0 to destroy."

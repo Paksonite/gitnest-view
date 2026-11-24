@@ -649,6 +649,28 @@ final class LiveForgejoTests: XCTestCase {
         try await LabHelper.close(reviewer, labSlug, pull: number, branch: branch)
     }
 
+    /// A release published from the app's form: the server makes the tag
+    /// on the chosen branch and lists the release with its notes.
+    func testPublishesARelease() async throws {
+        guard ProcessInfo.processInfo.environment["GNV_WRITE"] == "1" else { throw XCTSkip("GNV_WRITE is not set") }
+        let tag = "v0.0.\(Int(Date().timeIntervalSince1970) % 100_000)-gnv"
+        let repo = try XCTUnwrap(slug)
+        addTeardownBlock { [client] in
+            guard let client else { return }
+            let path = "repos/\(repo.owner)/\(repo.name)"
+            _ = try? await LabHelper.request(client, "DELETE", "\(path)/releases/tags/\(tag)", nil)
+            _ = try? await LabHelper.request(client, "DELETE", "\(path)/tags/\(tag)", nil)
+        }
+        try await client.createRelease(repo, tag: tag, target: "main", name: "Live \(tag)", notes: "- one\n- two", draft: false, prerelease: true)
+        let releases = try await client.releases(repo)
+        let release = try XCTUnwrap(releases.first { $0.tagName == tag })
+        XCTAssertEqual(release.name, "Live \(tag)")
+        XCTAssertEqual(release.prerelease, true)
+        XCTAssertEqual(release.body, "- one\n- two")
+        let tagged = try await LabHelper.request(client, "GET", "repos/\(repo.owner)/\(repo.name)/tags/\(tag)", nil)
+        XCTAssertFalse(tagged.isEmpty)
+    }
+
     /// The to-do queue, the releases across the lab, and the quick actions
     /// of the menu bar, against the lab organisation.
     @MainActor

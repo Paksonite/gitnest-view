@@ -82,6 +82,19 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(try commit("f", "Merge branch 'main' into x", "2026-11-24T11:30:51Z").isMerge)
     }
 
+    func testNextVersionAndReleaseNotes() throws {
+        XCTAssertEqual(AppModel.nextVersion(after: "v1.4.2"), "v1.4.3")
+        XCTAssertEqual(AppModel.nextVersion(after: "2.0.9"), "2.0.10")
+        XCTAssertEqual(AppModel.nextVersion(after: "v2.0.0-rc.1"), "v2.0.0")
+        XCTAssertEqual(AppModel.nextVersion(after: "release-7"), "v0.1.0")
+        XCTAssertEqual(AppModel.nextVersion(after: nil), "v0.1.0")
+        let commits = try JSONDecoder().decode([PullCommit].self, from: Data(#"""
+        [{"sha":"abcdef123","commit":{"message":"feat: MGCMT-1 add alerts\n\nbody"},"parents":[{"sha":"x"}]},
+         {"sha":"0123456aa","commit":{"message":"Merge pull request 'develop' (#9)"},"parents":[{"sha":"x"},{"sha":"y"}]}]
+        """#.utf8))
+        XCTAssertEqual(AppModel.releaseNotes(commits), "- feat: MGCMT-1 add alerts (abcdef1)")
+    }
+
     func testKeyJobsHideWhatPassed() throws {
         let model = try model()
         let jobs = [

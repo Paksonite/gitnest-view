@@ -173,6 +173,35 @@ extension AppModel {
         return (try? await client.releases(slug)) ?? []
     }
 
+    /// Publishes a release on the server. Returns false when it refused.
+    func publishRelease(_ repo: ForgeRepo, tag: String, target: String, name: String, notes: String, draft: Bool, prerelease: Bool) async -> Bool {
+        guard let (slug, client) = self.target(repo) else { return false }
+        do {
+            try await client.createRelease(slug, tag: tag, target: target, name: name.isEmpty ? tag : name, notes: notes, draft: draft, prerelease: prerelease)
+            toast(draft ? "Saved the draft of \(tag)" : "Published \(tag)")
+            releasesRevision += 1
+            return true
+        } catch {
+            toast(error.localizedDescription, .error)
+            return false
+        }
+    }
+
+    /// The version after `tag`: the last number goes up, a pre-release
+    /// suffix goes away ("v1.4.2" → "v1.4.3", "v2.0.0-rc.1" → "v2.0.0").
+    nonisolated static func nextVersion(after tag: String?) -> String {
+        guard let tag, let match = tag.firstMatch(of: /^(.*?)(\d+)\.(\d+)\.(\d+)(.*)$/) else { return "v0.1.0" }
+        let patch = Int(match.output.4) ?? 0
+        let bump = match.output.5.isEmpty ? patch + 1 : patch
+        return "\(match.output.1)\(match.output.2).\(match.output.3).\(bump)"
+    }
+
+    /// Release notes from the commits since the last release: one line
+    /// each, merges left out.
+    nonisolated static func releaseNotes(_ commits: [PullCommit]) -> String {
+        commits.filter { !$0.isMerge }.map { "- \($0.subject) (\($0.sha.prefix(7)))" }.joined(separator: "\n")
+    }
+
     /// The commits a release brought since the one before it, newest first.
     func commits(of repo: ForgeRepo, from old: String, to new: String) async throws -> [PullCommit] {
         guard let (slug, client) = target(repo) else { return [] }

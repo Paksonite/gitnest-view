@@ -14,7 +14,10 @@ struct ReleasesView: View {
             if let releases, releases.isEmpty {
                 EmptyState("No releases", symbol: "shippingbox",
                            message: "\(repo.name) has no release on \(model.workspace?.host ?? "the server") yet. Tags in the clone are in History.") {
-                    Button("History") { model.repoTab = .history }.buttonStyle(ChipButtonStyle())
+                    HStack(spacing: 8) {
+                        newRelease
+                        Button("History") { model.repoTab = .history }.buttonStyle(ChipButtonStyle())
+                    }
                 }
             } else if let releases {
                 HStack(spacing: 0) {
@@ -32,14 +35,36 @@ struct ReleasesView: View {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: repo.id) {
+        .task(id: "\(repo.id)/\(model.releasesRevision)") {
+            let before = Set((releases ?? []).map(\.id))
             let found = await model.releases(of: repo)
             releases = found
+            // A release just published here is the one to look at.
+            if let fresh = found.first(where: { !before.isEmpty && !before.contains($0.id) }) { chosen = fresh.id }
             if chosen == nil || !found.contains(where: { $0.id == chosen }) { chosen = found.first?.id }
         }
     }
 
+    private var newRelease: some View {
+        Button("New Release", systemImage: "plus") { model.sheet = .newRelease(repo) }
+            .buttonStyle(ChipButtonStyle(prominent: true))
+            .needsWrite()
+            .help("Publish a release: a version tag with notes")
+    }
+
     private func list(_ releases: [ForgeRelease]) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("\(releases.count) release\(releases.count == 1 ? "" : "s")").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                Spacer()
+                newRelease
+            }
+            .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 2)
+            releaseList(releases)
+        }
+    }
+
+    private func releaseList(_ releases: [ForgeRelease]) -> some View {
         ScrollView {
             LazyVStack(spacing: 1) {
                 ForEach(releases) { release in
