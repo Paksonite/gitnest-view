@@ -138,7 +138,7 @@ extension AppModel {
     func rerunFailed(_ pull: MyPull) async -> Bool {
         guard let slug = Self.slug(host: pull.host, fullName: pull.repoFullName), let client = client(for: pull.host) else { return false }
         do {
-            let failed = try await client.runs(slug, limit: 10, headSHA: pull.headSHA).filter { $0.state == .failure }
+            let failed = try await client.runs(slug, limit: 10, headSHA: pull.checksSHA ?? pull.headSHA).filter { $0.state == .failure }
             guard !failed.isEmpty else {
                 toast("No failed pipeline to run again on \(slug.name) #\(pull.number)", .info)
                 return false
@@ -168,7 +168,8 @@ extension AppModel {
     func rerunFailed(of pull: PullRequest, in repo: ForgeRepo) async {
         guard let slug = slug(repo), let client = client(for: slug.host) else { return }
         do {
-            let failed = try await client.runs(slug, limit: 10, headSHA: pull.head.sha).filter { $0.state == .failure }
+            let checked = forge[slug.key]?.statuses[pull.head.sha]?.sha ?? pull.head.sha
+            let failed = try await client.runs(slug, limit: 10, headSHA: checked).filter { $0.state == .failure }
             guard !failed.isEmpty else { return toast("No failed pipeline to run again on #\(pull.number)", .info) }
             guard supportsRerun(slug.host) else {
                 await onWebPages(slug.host, success: "Running \(failed.count == 1 ? "the pipeline" : "\(failed.count) pipelines") of #\(pull.number) again") { [weak self] in

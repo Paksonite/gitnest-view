@@ -170,6 +170,7 @@ struct GitLabClient: ForgeService {
         try? Translate.decode([
             "sha": item["id"] ?? "",
             "commit": ["message": item["message"] ?? item["title"] ?? "", "author": ["name": item["author_name"] ?? NSNull(), "date": item["authored_date"] ?? item["created_at"] ?? NSNull()]],
+            "parents": (item["parent_ids"] as? [String] ?? []).map { ["sha": $0] },
         ])
     }
 
