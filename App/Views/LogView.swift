@@ -295,6 +295,52 @@ final class MeasuringTextView: NSTextView {
     var onHeight: ((CGFloat) -> Void)?
     private var reported: CGFloat = -1
 
+    /// Selecting by dragging. AppKit's own tracking holds back the mouse
+    /// wheel until the button is up, and the log scrolls in SwiftUI around
+    /// the text: here the wheel scrolls while selecting, the selection
+    /// follows the pointer, and dragging past an edge scrolls on.
+    override func mouseDown(with event: NSEvent) {
+        let plain = event.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty
+        guard event.clickCount == 1, plain, let window else { return super.mouseDown(with: event) }
+        window.makeFirstResponder(self)
+        let anchor = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+        var range = NSRange(location: anchor, length: 0)
+        setSelectedRange(range)
+        var pointer = event.locationInWindow
+        func follow(still: Bool) {
+            let index = characterIndexForInsertion(at: convert(pointer, from: nil))
+            range = NSRange(location: min(anchor, index), length: abs(index - anchor))
+            setSelectedRange(range, affinity: .downstream, stillSelecting: still)
+        }
+        NSEvent.startPeriodicEvents(afterDelay: 0.1, withPeriod: 0.05)
+        defer { NSEvent.stopPeriodicEvents() }
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp, .scrollWheel, .periodic]) {
+            switch next.type {
+            case .leftMouseUp:
+                pointer = next.locationInWindow
+                follow(still: false)
+                return
+            case .leftMouseDragged:
+                pointer = next.locationInWindow
+                follow(still: true)
+            case .scrollWheel:
+                enclosingScrollView?.scrollWheel(with: next)
+                follow(still: true)
+            case .periodic:
+                // Past the top or bottom edge: the log keeps moving.
+                pointer = window.mouseLocationOutsideOfEventStream
+                if let clip = enclosingScrollView?.contentView,
+                   let drag = NSEvent.mouseEvent(with: .leftMouseDragged, location: pointer, modifierFlags: [], timestamp: next.timestamp,
+                                                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1),
+                   clip.autoscroll(with: drag) {
+                    follow(still: true)
+                }
+            default:
+                break
+            }
+        }
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         measure()

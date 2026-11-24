@@ -23,6 +23,18 @@ final class TerraformPlanTests: XCTestCase {
         XCTAssertEqual(plan.changes.first?.address, #"module.cloud_dns["private-a"].google_dns_record_set.this["k8s"]"#)
     }
 
+    func testKeysWithSpaces() throws {
+        let plan = try XCTUnwrap(TerraformPlan.parse(lines("""
+          # module.mon.google_logging_metric.log_metrics["vpn_egress_ti_denied"] will be created
+          # module.mon.google_monitoring_alert_policy.alerts["VPN - connection to Threat Intelligence IP blocked"] will be created
+          # module.mon.google_monitoring_alert_policy.alerts["say \\"hi\\" now"] will be created
+          # (because a "b c" is not in configuration) will be destroyed
+        Plan: 3 to add, 0 to change, 0 to destroy.
+        """)))
+        XCTAssertEqual(plan.changes.count, 3)
+        XCTAssertEqual(plan.changes[1].address, #"module.mon.google_monitoring_alert_policy.alerts["VPN - connection to Threat Intelligence IP blocked"]"#)
+    }
+
     func testApplyWinsOverTheEarlierPlan() throws {
         let plan = try XCTUnwrap(TerraformPlan.parse(lines("""
         # a.b will be created

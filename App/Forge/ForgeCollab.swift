@@ -201,6 +201,19 @@ extension ForgejoClient {
         try await get("repos/\(repo.owner)/\(repo.name)/releases", query: [.init(name: "page", value: "1"), .init(name: "limit", value: "50")])
     }
 
+    func createRelease(_ repo: RepoSlug, tag: String, target: String, name: String, notes: String, draft: Bool, prerelease: Bool) async throws {
+        struct Body: Encodable {
+            var tag_name: String
+            var target_commitish: String
+            var name: String
+            var body: String
+            var draft: Bool
+            var prerelease: Bool
+        }
+        _ = try await send("POST", "repos/\(repo.owner)/\(repo.name)/releases",
+                           body: Body(tag_name: tag, target_commitish: target, name: name, body: notes, draft: draft, prerelease: prerelease))
+    }
+
     func actionVariables(_ repo: RepoSlug) async throws -> [ActionVariable] {
         try await get("repos/\(repo.owner)/\(repo.name)/actions/variables")
     }

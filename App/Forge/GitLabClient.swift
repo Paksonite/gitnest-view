@@ -577,6 +577,11 @@ struct GitLabClient: ForgeService {
         }
     }
 
+    /// GitLab has no drafts or pre-releases: those choices are not offered there.
+    func createRelease(_ slug: RepoSlug, tag: String, target: String, name: String, notes: String, draft: Bool, prerelease: Bool) async throws {
+        try await api.send("POST", project(slug) + "/releases", json: ["tag_name": tag, "ref": target, "name": name, "description": notes])
+    }
+
     /// Plain variables with their values; masked and hidden ones are secrets.
     func actionVariables(_ slug: RepoSlug) async throws -> [ActionVariable] {
         try await list(project(slug) + "/variables", maxPages: 2)
