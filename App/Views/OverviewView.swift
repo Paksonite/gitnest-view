@@ -290,9 +290,10 @@ struct LiveRunCard: View {
             }
             HLine()
             if let job = watched, let slug = model.slug(repo) {
-                LogPane(target: LogTarget(repo: slug, runID: run.id, jobID: job.id, title: job.name, webURL: job.htmlURL))
-                    .id(job.id)
-                    .frame(height: 300)
+                ResizableHeight(key: "overviewLog", initial: 300) {
+                    LogPane(target: LogTarget(repo: slug, runID: run.id, jobID: job.id, title: job.name, webURL: job.htmlURL))
+                        .id(job.id)
+                }
             } else {
                 HStack(spacing: 8) {
                     Spinner(color: run.state.color)

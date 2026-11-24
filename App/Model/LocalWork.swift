@@ -230,6 +230,13 @@ extension AppModel {
 
     /// The local copy of a branch just merged and deleted on the server.
     /// Checked out, it is finished: the app switches to `base` and pulls it.
+    /// After a merge: a clone on the merged branch goes back to the branch it
+    /// was merged into, up to date; the merged branch stays.
+    func returnToBase(from head: String, into base: String, in repo: ForgeRepo) async {
+        guard let slug = slug(repo), local[slug.key]?.branch == head, head != base else { return }
+        await finishBranch(in: repo, into: base, keep: true)
+    }
+
     func deleteMergedLocal(_ name: String, into base: String, in repo: ForgeRepo) async {
         if let slug = slug(repo), local[slug.key]?.branch == name {
             await finishBranch(in: repo, into: base)
@@ -860,13 +867,15 @@ extension AppModel {
 
     /// Ends the work on a merged branch: switches back to the branch it was
     /// merged into, pulls it, and deletes the local branch (its commits are
-    /// in the merge). Uncommitted changes stop it.
+    /// in the merge). Uncommitted changes stop it. With `keep` the branch
+    /// stays: only the switch and the pull.
     @discardableResult
-    func finishBranch(in repo: ForgeRepo, into base: String) async -> Bool {
+    func finishBranch(in repo: ForgeRepo, into base: String, keep: Bool = false) async -> Bool {
         guard let slug = slug(repo), let clone = local[slug.key] else { return false }
         let branch = clone.branch
         if clone.changes > 0 || !clone.state.isEmpty {
-            toast("\(repo.name): \(branch) has uncommitted changes; commit or stash them first", .error)
+            toast("\(repo.name): \(branch) has uncommitted changes; commit or stash them first"
+                  + (keep ? ", then switch to \(base)" : ""), .error)
             return false
         }
         // The base as the server has it ("origin/develop"), whatever the remote is called.
@@ -882,10 +891,12 @@ extension AppModel {
         let ok = await change(repo) { clone in
             try await core.run("repo.checkout", CheckoutParams(path: clone.path, name: remote ?? base, remote: remote != nil))
             try await core.run("repo.pull", RepoParams(path: clone.path, auth: auth))
+            guard !keep else { return }
             // Forced: a squash merge leaves the branch's own commits unmerged in git's eyes.
             try await core.run("repo.branch.delete", Delete(path: clone.path, name: branch, force: true, remote: false, auth: nil))
         }
-        if ok { mergedPulls[clone.path + "|" + branch] = nil }
+        if ok, !keep { mergedPulls[clone.path + "|" + branch] = nil }
+        if ok, keep { toast("\(repo.name): switched to \(base)") }
         return ok
     }
 

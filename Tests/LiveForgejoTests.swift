@@ -292,8 +292,21 @@ final class LiveForgejoTests: XCTestCase {
         XCTAssertEqual(model.forgeState(repo).summary(for: pull).approvals, 1)
         XCTAssertFalse(model.reviewRequested(of: pull, in: repo))
 
+        // The clone is on the pull request's branch, as after working on it.
+        await model.clone(repo)
+        await model.run(.fetch, on: repo)
+        let list = await model.branches(of: repo)
+        let head = try XCTUnwrap(list?.remote.first { $0.serverName == branch })
+        await model.checkout(head, in: repo)
+        XCTAssertEqual(model.clone(of: repo)?.branch, branch)
+
         let merged = await model.merge(pull, style: "squash", deleteBranch: true, in: repo)
         XCTAssertTrue(merged, model.toasts.map(\.text).joined(separator: "; "))
+        // Back on the branch it went into, which now has the merge.
+        await model.returnToBase(from: pull.head.ref, into: pull.base.ref, in: repo)
+        XCTAssertEqual(model.clone(of: repo)?.branch, pull.base.ref, model.toasts.map(\.text).joined(separator: "; "))
+        let notes = try XCTUnwrap(model.clone(of: repo)).path + "/" + file
+        XCTAssertTrue(FileManager.default.fileExists(atPath: notes), "the base was pulled after the merge")
         let client = try XCTUnwrap(model.client(for: slug.host) as? ForgejoClient)
         let after = try await client.pullRequest(labSlug, number: number)
         XCTAssertEqual(after.merged, true)
