@@ -431,6 +431,24 @@ final class CodeTextView: NSTextView {
         onEscape?()
     }
 
+    /// A click or a selection asks to show the whole line, as wide as the
+    /// longest line: AppKit then lines its start up again and the text jumps
+    /// sideways. A rect already in sight keeps the view where it is.
+    override func scrollToVisible(_ rect: NSRect) -> Bool {
+        guard let scroll = enclosingScrollView else { return super.scrollToVisible(rect) }
+        let clip = scroll.contentView
+        let before = clip.bounds.origin.x
+        // What is not under the line numbers.
+        let from = before + clip.contentInsets.left, to = before + clip.bounds.width
+        let inSight = (rect.minX >= from && rect.maxX <= to) || (rect.width > to - from && rect.maxX > from && rect.minX < to)
+        let moved = super.scrollToVisible(rect)
+        if inSight, clip.bounds.origin.x != before {
+            clip.scroll(to: NSPoint(x: before, y: clip.bounds.origin.y))
+            scroll.reflectScrolledClipView(clip)
+        }
+        return moved
+    }
+
     /// ⌘G and ⇧⌘G go to the next and the previous match, from the text or
     /// from the find bar's field.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
