@@ -265,6 +265,9 @@ final class AppModel {
     @ObservationIgnored private var extrasRead: [String: Date] = [:]
     /// When a pull request's reviews and checks were last read with its repository.
     @ObservationIgnored private var extrasChecked: [String: Date] = [:]
+    /// Head commits with no checks of their own and none on the commits
+    /// before them: not searched again ("host/owner/name#sha").
+    @ObservationIgnored var bareHeads: Set<String> = []
     /// Logs of finished jobs already searched for a Terraform plan.
     private var planCache: [String: TerraformPlan?] = [:]
     private var errorCache: [String: [String]] = [:]
@@ -1024,17 +1027,22 @@ final class AppModel {
                 state.pulls = freshPulls
                 state.runs = freshRuns
                 let open = freshPulls.filter { $0.state == "open" }
+                let bare = bareHeads
                 await withTaskGroup(of: (Int, String, [Review]?, CombinedStatus?).self) { group in
                     for pull in open {
+                        let search = !bare.contains(Self.headKey(slug, pull.head.sha))
                         group.addTask {
                             async let reviews = try? client.reviews(slug, pull: pull.number)
-                            async let status = try? client.combinedStatus(slug, ref: pull.head.sha)
+                            async let status = try? Self.pullChecks(pull, slug: slug, client: client, search: search)
                             return await (pull.number, pull.head.sha, reviews, status)
                         }
                     }
                     for await (number, sha, reviews, status) in group {
                         if let reviews { state.reviews[number] = reviews }
-                        if let status { state.statuses[sha] = status }
+                        if let status {
+                            state.statuses[sha] = status
+                            if status.checks.isEmpty { bareHeads.insert(Self.headKey(slug, sha)) }
+                        }
                     }
                 }
                 state.loaded = true
@@ -1094,6 +1102,27 @@ final class AppModel {
 
     static func branchKey(_ slug: RepoSlug, _ branch: String) -> String { "\(slug.key)@\(branch)" }
 
+    nonisolated static func headKey(_ slug: RepoSlug, _ sha: String) -> String { "\(slug.key)#\(sha)" }
+
+    /// The checks a pull request shows: those of its head commit, or, when
+    /// that commit started none (a pipeline pushed it with its own token,
+    /// which starts no pipelines, or it says "[skip ci]"), those of the
+    /// newest commit before it that has some. `sha` says which commit.
+    nonisolated static func pullChecks(_ pull: PullRequest, slug: RepoSlug, client: any ForgeService, search: Bool = true) async throws -> CombinedStatus {
+        var head = try await client.combinedStatus(slug, ref: pull.head.sha)
+        head.sha = pull.head.sha
+        guard search, head.checks.isEmpty, let commits = try? await client.pullCommits(slug, pull: pull.number) else { return head }
+        // Forgejo lists the newest first, GitHub and GitLab the oldest.
+        var shas = commits.map(\.sha)
+        if shas.last == pull.head.sha { shas.reverse() }
+        guard shas.first == pull.head.sha else { return head }
+        for sha in shas.dropFirst().prefix(4) {
+            guard var older = try? await client.combinedStatus(slug, ref: sha) else { break }
+            if !older.checks.isEmpty { older.sha = sha; return older }
+        }
+        return head
+    }
+
     /// Commits, files, reviews, checks, the pipelines of the pull request
     /// and of its merge, and what Terraform printed in them.
     func loadExtras(_ pull: PullRequest, in repo: ForgeRepo, ifOlderThan age: TimeInterval = 0) async {
@@ -1118,8 +1147,12 @@ final class AppModel {
         async let commits = try? client.pullCommits(slug, pull: pull.number)
         async let files = try? client.pullFiles(slug, pull: pull.number)
         async let reviews = checked ? nil : try? client.reviews(slug, pull: pull.number)
-        async let status = checked ? nil : try? client.combinedStatus(slug, ref: pull.head.sha)
-        async let headRuns = try? client.runs(slug, limit: 10, headSHA: pull.head.sha)
+        let search = !bareHeads.contains(Self.headKey(slug, pull.head.sha))
+        async let status = checked ? nil : try? Self.pullChecks(pull, slug: slug, client: client, search: search)
+        // The commit whose checks are shown: the head, or the one before it
+        // that started the pipelines.
+        let known = forge[slug.key]?.statuses[pull.head.sha]?.sha ?? pull.head.sha
+        async let headRuns = try? client.runs(slug, limit: 10, headSHA: known)
         async let afterMerge: [WorkflowRun]? = merged == nil ? nil : try? client.runs(slug, limit: 20, headSHA: merged!)
         // Only admins may read them: anyone else gets an empty list.
         async let rules: [BranchProtection]? = needsRules ? ((try? await client.branchProtections(slug)) ?? []) : nil
@@ -1127,7 +1160,11 @@ final class AppModel {
         async let base = try? client.branch(slug, name: pull.base.ref)
 
         var extra = extras[key] ?? PullExtras()
-        if let runs = await headRuns {
+        var pullRuns = await headRuns
+        if let checks = await status, let sha = checks.sha, sha != known {
+            pullRuns = try? await client.runs(slug, limit: 10, headSHA: sha)
+        }
+        if let runs = pullRuns {
             // The pipeline of the pull request itself first, then the push's.
             extra.pullRuns = runs.filter { $0.trigger == "pull_request" } + runs.filter { $0.trigger != "pull_request" && $0.trigger != "schedule" }
         }
@@ -1159,7 +1196,10 @@ final class AppModel {
             }
             extra.lineComments = lines.sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
         }
-        if let checks = await status { state.statuses[pull.head.sha] = checks }
+        if let checks = await status {
+            state.statuses[pull.head.sha] = checks
+            if checks.checks.isEmpty { bareHeads.insert(Self.headKey(slug, pull.head.sha)) }
+        }
         if forge[slug.key] != state { forge[slug.key] = state }
         if let rules = await rules, protections[slug.key] != rules { protections[slug.key] = rules }
         if let base = await base, branches[Self.branchKey(slug, pull.base.ref)] != base { branches[Self.branchKey(slug, pull.base.ref)] = base }
@@ -1430,6 +1470,21 @@ final class AppModel {
     // MARK: - Releases
 
     /// "INFRA-50", "ABC-1": ticket keys mentioned in commit messages.
+    /// A new pull request's title: the subject of the branch's first own
+    /// commit. Merges are not the branch's work: a branch started from main
+    /// carries main's "Merge pull request 'develop'…" commits into a pull
+    /// request to develop. When the branch is named after a ticket, the
+    /// first commit that names it wins.
+    static func pullTitle(_ commits: [PullCommit], head: String) -> String {
+        let own = commits.filter { !$0.isMerge }
+            .sorted { ($0.commit.author?.date ?? .distantPast) < ($1.commit.author?.date ?? .distantPast) }
+        let named = tickets(in: [head])
+        if !named.isEmpty, let first = own.first(where: { commit in named.contains { commit.commit.message.contains($0) } }) {
+            return first.subject
+        }
+        return own.first?.subject ?? head
+    }
+
     static func tickets(in messages: [String]) -> [String] {
         var found: [String] = []
         for message in messages {
@@ -1458,8 +1513,7 @@ final class AppModel {
         if release {
             title = tickets.isEmpty ? "chore: release \(head) into \(base)" : "chore: \(tickets.joined(separator: ", ")) release"
         } else {
-            let oldestFirst = commits.sorted { ($0.commit.author?.date ?? .distantPast) < ($1.commit.author?.date ?? .distantPast) }
-            title = oldestFirst.first?.subject ?? head
+            title = Self.pullTitle(commits, head: head)
         }
         let body = ""
         return ReleaseDraft(head: head, base: base, commits: commits, tickets: tickets, title: title, body: body, existing: existing)

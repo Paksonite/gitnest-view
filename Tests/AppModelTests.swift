@@ -62,6 +62,26 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(AppModel.tickets(in: []), [])
     }
 
+    func testPullTitleSkipsMergesAndPrefersTheBranchTicket() throws {
+        func commit(_ sha: String, _ message: String, _ date: String, parents: Int = 1) throws -> PullCommit {
+            let parentList = (0..<parents).map { #"{"sha":"p\#($0)"}"# }.joined(separator: ",")
+            let json = #"{"sha":"\#(sha)","commit":{"message":"\#(message)","author":{"date":"\#(date)"}},"parents":[\#(parentList)]}"#
+            let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(PullCommit.self, from: Data(json.utf8))
+        }
+        let commits = [
+            try commit("a", "Merge pull request 'develop' (#94) from develop into main", "2026-10-06T08:40:36Z", parents: 2),
+            try commit("b", "Merge develop into main", "2026-11-06T08:53:57Z", parents: 2),
+            try commit("c", "fix: hotfix on main", "2026-11-10T08:00:00Z"),
+            try commit("d", "chore: MGCMT-530 add monitoring", "2026-11-24T11:30:21Z"),
+            try commit("e", "chore: format tf files", "2026-11-24T11:30:51Z"),
+        ]
+        XCTAssertEqual(AppModel.pullTitle(commits, head: "chore/MGCMT-530"), "chore: MGCMT-530 add monitoring")
+        XCTAssertEqual(AppModel.pullTitle(commits, head: "feature/no-ticket"), "fix: hotfix on main")
+        XCTAssertEqual(AppModel.pullTitle(Array(commits.prefix(2)), head: "develop"), "develop")
+        XCTAssertTrue(try commit("f", "Merge branch 'main' into x", "2026-11-24T11:30:51Z").isMerge)
+    }
+
     func testKeyJobsHideWhatPassed() throws {
         let model = try model()
         let jobs = [

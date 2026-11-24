@@ -245,7 +245,7 @@ struct PullDetail: View {
                         ReviewsCard(summary: forge.summary(for: pull), required: model.requiredApprovals(pull, in: repo), open: pull.state == "open",
                                     known: model.knowsRequirement(pull, in: repo))
                         if pull.state == "open" { PeopleCard(repo: repo, pull: pull) }
-                        ChecksCard(repo: repo, status: forge.statuses[pull.head.sha], scheduled: AppModel.scheduledRuns(forge.runs),
+                        ChecksCard(repo: repo, status: forge.statuses[pull.head.sha], head: pull.head.sha, scheduled: AppModel.scheduledRuns(forge.runs),
                                    rerun: pull.state == "open" ? { Task { await model.rerunFailed(of: pull, in: repo) } } : nil)
                         CommitsCard(commits: extra.commits, loaded: extra.loaded)
                         FilesCard(files: extra.files, loaded: extra.loaded, count: pull.changedFiles, attribution: attribution) { file in
@@ -675,6 +675,8 @@ struct ChecksCard: View {
     @Environment(AppModel.self) private var model
     let repo: ForgeRepo
     let status: CombinedStatus?
+    /// The pull request's head commit: the checks may be of one before it.
+    var head: String? = nil
     /// The repository's standing checks: the newest scheduled run of each workflow.
     var scheduled: [WorkflowRun] = []
 
@@ -706,6 +708,11 @@ struct ChecksCard: View {
         } content: {
             if checks.isEmpty {
                 Text("No checks for this commit.").foregroundStyle(Theme.secondary)
+            } else if let head, let sha = status?.sha, sha != head {
+                Text("Of commit \(sha.prefix(7)): the newer ones started no pipelines.")
+                    .font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help("The newest commit was pushed without starting pipelines (by a pipeline itself, or with [skip ci]), so these are the checks of the newest commit that has some.")
             }
             ForEach(checks) { check in
                 CheckRow(check: check) { Task { await model.openLog(for: check, in: repo) } }

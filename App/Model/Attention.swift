@@ -71,6 +71,8 @@ struct MyPull: Identifiable, Hashable, Sendable {
     var htmlURL: String?
     var approvals = 0
     var changesRequested = false
+    /// The commit whose checks these are, when not the head (see AppModel.pullChecks).
+    var checksSHA: String?
     var id: String { "\(host)/\(repoFullName)#\(number)" }
 
     /// Approved, nobody asks for changes, and the checks pass (or there are none).
@@ -127,6 +129,7 @@ extension AppModel {
                 fresh += myPulls.filter { $0.host == account.host }
                 continue
             }
+            let bare = bareHeads
             await withTaskGroup(of: MyPull?.self) { group in
                 for hit in hits {
                     guard let fullName = hit.repository?.fullName else { continue }
@@ -135,17 +138,25 @@ extension AppModel {
                     let slug = RepoSlug(host: account.host, owner: parts[0], name: parts[1])
                     group.addTask {
                         guard let pull = try? await client.pullRequest(slug, number: hit.number) else { return nil }
-                        async let status = try? client.combinedStatus(slug, ref: pull.head.sha)
+                        let search = !bare.contains(AppModel.headKey(slug, pull.head.sha))
+                        async let status = try? AppModel.pullChecks(pull, slug: slug, client: client, search: search)
                         async let reviews = try? client.reviews(slug, pull: hit.number)
                         let checks = await status
                         let state = (checks?.checks.isEmpty ?? true) ? CheckState.unknown : checks!.overall
                         let summary = ReviewSummary(reviews: await reviews ?? [], requested: pull.requestedReviewers ?? [])
                         return MyPull(host: account.host, repoFullName: fullName, number: hit.number, title: hit.title,
                                       headSHA: pull.head.sha, state: state, htmlURL: hit.htmlURL,
-                                      approvals: summary.approvals, changesRequested: summary.changesRequested > 0)
+                                      approvals: summary.approvals, changesRequested: summary.changesRequested > 0,
+                                      checksSHA: checks?.sha)
                     }
                 }
-                for await item in group { if let item { fresh.append(item) } }
+                for await item in group {
+                    guard let item else { continue }
+                    fresh.append(item)
+                    if item.state == .unknown, let slug = Self.slug(host: item.host, fullName: item.repoFullName) {
+                        bareHeads.insert(Self.headKey(slug, item.headSHA))
+                    }
+                }
             }
         }
         let before = Dictionary(myPulls.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })

@@ -427,12 +427,24 @@ struct PullCommit: Decodable, Identifiable, Hashable, Sendable {
         var author: Person?
     }
 
+    struct Parent: Decodable, Hashable, Sendable {
+        var sha: String
+    }
+
     var sha: String
     var commit: Detail
     var author: ForgeUser?
+    var parents: [Parent]?
 
     var id: String { sha }
     var subject: String { commit.message.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? "" }
+
+    /// A merge: two parents, or the subject a merge writes when the server
+    /// does not say which parents there are.
+    var isMerge: Bool {
+        if let parents, parents.count > 1 { return true }
+        return ["Merge pull request ", "Merge branch ", "Merge remote-tracking branch ", "Merge tag "].contains { subject.hasPrefix($0) }
+    }
 }
 
 struct PullFile: Decodable, Identifiable, Hashable, Sendable {
