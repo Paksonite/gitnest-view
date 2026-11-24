@@ -461,12 +461,13 @@ struct RunCard: View {
             if !run.state.isFinished, let job = jobs.first(where: { $0.state == .running && $0.hasStarted && model.isKey($0) })
                 ?? jobs.first(where: { $0.state == .running && $0.hasStarted }), let slug = model.slug(repo) {
                 // While it runs, the log is here: no click needed to see it move.
-                LogPane(target: LogTarget(repo: slug, runID: run.id, jobID: job.id, title: job.name, webURL: job.htmlURL))
-                    .id(job.id)
-                    .frame(height: 260)
-                    .background(Theme.inset, in: RoundedRectangle(cornerRadius: 6))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
+                ResizableHeight(key: "pullLog", initial: 260) {
+                    LogPane(target: LogTarget(repo: slug, runID: run.id, jobID: job.id, title: job.name, webURL: job.htmlURL))
+                        .id(job.id)
+                        .background(Theme.inset, in: RoundedRectangle(cornerRadius: 6))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
+                }
             }
             if visible.passed + visible.other > 0 {
                 // The other jobs are worth a line only: they passed, or have not run.

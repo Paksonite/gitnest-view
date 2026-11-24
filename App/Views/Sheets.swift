@@ -1085,7 +1085,11 @@ struct MergeSheet: View {
                 Task {
                     if await model.merge(pull, style: style, deleteBranch: deleteBranch, in: repo) {
                         model.sheet = nil
-                        if deleteBranch && deleteLocal && hasLocal { await model.deleteMergedLocal(pull.head.ref, into: pull.base.ref, in: repo) }
+                        if deleteBranch && deleteLocal && hasLocal {
+                            await model.deleteMergedLocal(pull.head.ref, into: pull.base.ref, in: repo)
+                        } else {
+                            await model.returnToBase(from: pull.head.ref, into: pull.base.ref, in: repo)
+                        }
                     }
                     working = false
                 }

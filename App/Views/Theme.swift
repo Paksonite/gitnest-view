@@ -632,6 +632,8 @@ struct ResizableColumn<Content: View>: View {
     @State private var width: CGFloat?
     @State private var start: CGFloat?
     @State private var hovering = false
+    /// Where the column starts in the window.
+    @State private var left: CGFloat = 0
 
     var body: some View {
         let current = width ?? initial
@@ -651,7 +653,7 @@ struct ResizableColumn<Content: View>: View {
                     DragGesture(minimumDistance: 1, coordinateSpace: .global)
                         .onChanged { drag in
                             if start == nil { start = current }
-                            width = min(range.upperBound, max(range.lowerBound, (start ?? current) + drag.translation.width))
+                            width = clamp((start ?? current) + drag.translation.width)
                         }
                         .onEnded { _ in
                             start = nil
@@ -665,11 +667,87 @@ struct ResizableColumn<Content: View>: View {
                 .help("Drag to resize; double-click for the usual width")
                 .accessibilityLabel("Resize")
         }
+        .background(GeometryReader { box in
+            Color.clear.onChange(of: box.frame(in: .global).minX, initial: true) { _, x in left = x }
+        })
         .onAppear {
             if width == nil, let saved = model.defaults.object(forKey: "width." + key) as? Double {
-                width = min(range.upperBound, max(range.lowerBound, CGFloat(saved)))
+                width = clamp(CGFloat(saved))
             }
         }
+    }
+
+    /// Within the range, and never so wide that what is beside it in the
+    /// window has no room left.
+    private func clamp(_ value: CGFloat) -> CGFloat {
+        let room = WindowRoom.size.width - left - 380
+        return max(range.lowerBound, min(range.upperBound, room, value))
+    }
+}
+
+/// The room the app's window has: what a dragged edge may not go past.
+@MainActor
+enum WindowRoom {
+    static var size: CGSize {
+        (NSApp.keyWindow ?? NSApp.mainWindow)?.contentLayoutRect.size ?? CGSize(width: 1440, height: 880)
+    }
+}
+
+/// A box whose bottom edge can be dragged; its height is remembered.
+/// A double click on the edge brings the height back to where it started.
+struct ResizableHeight<Content: View>: View {
+    @Environment(AppModel.self) private var model
+    let key: String
+    let initial: CGFloat
+    var range: ClosedRange<CGFloat> = 140...1600
+    @ViewBuilder var content: Content
+    @State private var height: CGFloat?
+    @State private var start: CGFloat?
+    @State private var hovering = false
+
+    var body: some View {
+        let current = height ?? initial
+        VStack(spacing: 0) {
+            content.frame(height: current)
+            Capsule()
+                .fill(hovering || start != nil ? Theme.blue.opacity(0.7) : Theme.tertiary.opacity(0.5))
+                .frame(width: 36, height: 4)
+                .frame(maxWidth: .infinity)
+                .frame(height: 12)
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    hovering = inside
+                    if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { drag in
+                            if start == nil { start = current }
+                            height = clamp((start ?? current) + drag.translation.height)
+                        }
+                        .onEnded { _ in
+                            start = nil
+                            if let height { model.defaults.set(Double(height), forKey: "height." + key) }
+                        }
+                )
+                .onTapGesture(count: 2) {
+                    height = initial
+                    model.defaults.removeObject(forKey: "height." + key)
+                }
+                .help("Drag to make the log taller or shorter; double-click for the usual height")
+                .accessibilityLabel("Resize")
+        }
+        .onAppear {
+            if height == nil, let saved = model.defaults.object(forKey: "height." + key) as? Double {
+                height = clamp(CGFloat(saved))
+            }
+        }
+    }
+
+    /// Within the range, and never taller than the window shows at once.
+    private func clamp(_ value: CGFloat) -> CGFloat {
+        let room = WindowRoom.size.height - 200
+        return max(range.lowerBound, min(range.upperBound, room, value))
     }
 }
 
