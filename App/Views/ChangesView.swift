@@ -549,6 +549,9 @@ private struct DiffPane: View {
             // reach its edge.
             .frame(minWidth: max(viewport.size.width, DiffRow.width(of: diff)), alignment: .leading)
             .padding(.bottom, 12)
+            // A scroll view on both axes centres content shorter than
+            // itself; a short diff starts at the top instead.
+            .frame(minHeight: viewport.size.height, alignment: .top)
         }
         }
         .background(Theme.inset)
