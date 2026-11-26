@@ -33,6 +33,7 @@ private struct TicketWindow: View {
     let key: String
     @State private var ticket: JiraTicket?
     @State private var moves: [JiraTransition] = []
+    @State private var asking: JiraMoveRequest?
     @State private var priorities: [String] = []
     @State private var problem: String?
     /// Jira's reason for refusing the last change ("Time Spent is required").
@@ -106,6 +107,9 @@ private struct TicketWindow: View {
         }
         .task { await load() }
         .onDisappear { model.settleJira() }
+        .sheet(item: $asking) { request in
+            JiraMoveSheet(request: request) { Task { await load() } }
+        }
     }
 
     // MARK: Left: what it is and what was said
@@ -246,7 +250,12 @@ private struct TicketWindow: View {
             VStack(alignment: .leading, spacing: 8) {
                 label("Status")
                 StatusPicker(ticket: ticket, moves: moves, working: working) { move in
-                    change("\(key) is now \(move.to?.name ?? move.name)") { try await $0.moveTicket(key, transition: move.id) }
+                    working = true
+                    Task {
+                        asking = await model.chooseMove(key, move)
+                        if asking == nil { await load() }
+                        working = false
+                    }
                 }
             }
             VStack(alignment: .leading, spacing: 8) {

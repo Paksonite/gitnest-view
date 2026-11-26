@@ -449,6 +449,7 @@ private struct JiraStatusButton: View {
     let issue: JiraIssue
     @State private var open = false
     @State private var moves: [JiraTransition]?
+    @State private var asking: JiraMoveRequest?
 
     var body: some View {
         Button { open = true } label: {
@@ -466,7 +467,7 @@ private struct JiraStatusButton: View {
                     ForEach(moves) { move in
                         Button {
                             open = false
-                            Task { await model.move(issue, by: move) }
+                            Task { asking = await model.chooseMove(issue.key, move) }
                         } label: {
                             Text(move.to?.name ?? move.name).frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 8).frame(height: 26).contentShape(Rectangle())
@@ -484,6 +485,7 @@ private struct JiraStatusButton: View {
             .background(Theme.window)
             .task { moves = await model.transitions(for: issue) }
         }
+        .sheet(item: $asking) { JiraMoveSheet(request: $0) }
     }
 }
 

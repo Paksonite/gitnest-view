@@ -251,10 +251,36 @@ final class CollabTests: XCTestCase {
 
         // The status moves only when the user chooses where to.
         let moves = await model.transitions(for: model.jira.issues[0])
-        XCTAssertEqual(moves.map { $0.to?.name }, ["Done", "To Do"])
-        await model.move(model.jira.issues[0], by: moves[0])
+        XCTAssertEqual(moves.map { $0.to?.name }, ["Done", "To Do", "Awaiting"])
+        let plain = await model.chooseMove("INFRA-77", moves[0])
+        XCTAssertNil(plain, "a move without a screen goes at once")
         XCTAssertEqual(CannedForge.writes, ["JIRA POST /rest/api/3/issue/INFRA-77/transitions"])
         CannedForge.change { $0.writes = [] }
+
+        // A move with a screen asks first, with its required field.
+        let awaiting = moves[2]
+        XCTAssertTrue(awaiting.asks)
+        XCTAssertEqual(awaiting.requiredFields.map(\.id), ["resolution"])
+        let asked = await model.chooseMove("INFRA-77", awaiting)
+        XCTAssertNotNil(asked)
+        XCTAssertNil(asked?.refusal)
+        XCTAssertEqual(CannedForge.writes, [], "nothing is moved before the user answers")
+        // Without the comment Jira's validator wants, Jira's reason comes back.
+        let bare = await model.moveTicket("INFRA-77", by: awaiting)
+        XCTAssertEqual(bare, "Comment is required.")
+        let input = JiraMoveInput(comment: "Waiting for the vendor", values: ["resolution": "10000"])
+        let body = input.body(awaiting)
+        XCTAssertEqual((body["fields"] as? [String: Any])?["resolution"] as? [String: String], ["id": "10000"])
+        XCTAssertNotNil((body["update"] as? [String: Any])?["comment"])
+        let sent = await model.moveTicket("INFRA-77", by: awaiting, input: input)
+        XCTAssertNil(sent)
+        XCTAssertEqual(CannedForge.writes, ["JIRA POST /rest/api/3/issue/INFRA-77/transitions"])
+        CannedForge.change { $0.writes = [] }
+
+        // A move Jira refuses although it showed no screen opens the form with Jira's reason.
+        let hidden = JiraTransition(id: "41", name: "Wait", to: awaiting.to)
+        let refused = await model.chooseMove("INFRA-77", hidden)
+        XCTAssertEqual(refused?.refusal, "Comment is required.")
 
         // The user's own filter replaces the default.
         await model.setJiraFilter("project = X")
