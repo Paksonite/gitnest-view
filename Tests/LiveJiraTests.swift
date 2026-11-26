@@ -83,7 +83,7 @@ final class LiveJiraTests: XCTestCase {
         }
 
         // A change Jira refuses comes back with Jira's reason, not a silent failure.
-        let refused = await model.jira("Moved") { try await $0.moveTicket(key, transition: "999999") }
+        let refused = await model.jira("Moved") { try await $0.moveTicket(key, JiraTransition(id: "999999", name: "None")) }
         XCTAssertNotNil(refused)
         let after = try await model.ticket(key)
         XCTAssertEqual(after.status, before.status)
@@ -177,14 +177,14 @@ final class LiveJiraTests: XCTestCase {
         let original = issue.fields.status.name
         let moves = await model.transitions(for: issue)
         let forward = try XCTUnwrap(moves.first, "the ticket cannot move anywhere")
-        await model.move(issue, by: forward)
+        _ = await model.moveTicket(issue.key, by: forward)
         let moved = try XCTUnwrap(model.jira.issues.first)
         XCTAssertEqual(moved.fields.status.name, forward.to?.name, model.toasts.map(\.text).joined(separator: "; "))
 
         // And back where it was, when the workflow allows it.
         let back = await model.transitions(for: moved)
         if let home = back.first(where: { $0.to?.name == original }) {
-            await model.move(moved, by: home)
+            _ = await model.moveTicket(moved.key, by: home)
             XCTAssertEqual(model.jira.issues.first?.fields.status.name, original)
         } else {
             XCTFail("\(key) is now \(moved.fields.status.name); no way back to \(original): \(back.map { $0.to?.name ?? $0.name })")

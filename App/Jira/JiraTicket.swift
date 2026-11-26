@@ -364,9 +364,10 @@ extension JiraClient {
         return me.accountId
     }
 
-    /// Moves a ticket along its workflow; Jira's reason comes back when it refuses.
-    func moveTicket(_ key: String, transition id: String) async throws {
-        _ = try await call("POST", "rest/api/3/issue/\(key)/transitions", json: ["transition": ["id": id]])
+    /// Moves a ticket along its workflow, with what its screen asks for;
+    /// Jira's reason comes back when it refuses.
+    func moveTicket(_ key: String, _ transition: JiraTransition, input: JiraMoveInput = JiraMoveInput()) async throws {
+        _ = try await call("POST", "rest/api/3/issue/\(key)/transitions", json: input.body(transition))
     }
 
     func addComment(_ key: String, text: String) async throws {

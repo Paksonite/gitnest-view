@@ -155,18 +155,39 @@ final class CannedForge: URLProtocol, @unchecked Sendable {
 
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == host || request.url?.host == jiraHost }
 
+    /// What a request sends: URLSession hands it over as a stream.
+    private static func readBody(_ request: URLRequest) -> String {
+        if let data = request.httpBody { return String(decoding: data, as: UTF8.self) }
+        guard let stream = request.httpBodyStream else { return "" }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let n = stream.read(&buffer, maxLength: buffer.count)
+            if n <= 0 { break }
+            data.append(buffer, count: n)
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     /// Jira Cloud's two answers the app reads; the token "wrong" is refused.
     private static func jira(_ request: URLRequest) -> (Int, Data) {
         lock.withLock { state.hits["jira:" + (request.url?.path ?? ""), default: 0] += 1 }
         let expected = "Basic " + Data("me@example.test:good".utf8).base64EncodedString()
         guard request.value(forHTTPHeaderField: "Authorization") == expected else { return (401, Data("{}".utf8)) }
         if request.httpMethod == "POST" {
+            // "Awaiting" (41) wants a comment, as a workflow validator does.
+            let body = readBody(request)
+            if body.contains(#""id":"41""#), !body.contains(#""comment""#) {
+                return (400, Data(#"{"errorMessages":["Comment is required."],"errors":{}}"#.utf8))
+            }
             lock.withLock { state.writes.append("JIRA POST " + (request.url?.path ?? "")) }
             return (204, Data())
         }
         switch request.url?.path {
         case "/rest/api/3/issue/INFRA-77/transitions":
-            return (200, Data(#"{"transitions":[{"id":"31","name":"Done","to":{"name":"Done"}},{"id":"11","name":"Back","to":{"name":"To Do"}}]}"#.utf8))
+            return (200, Data(#"{"transitions":[{"id":"31","name":"Done","to":{"name":"Done"}},{"id":"11","name":"Back","to":{"name":"To Do"}},{"id":"41","name":"Wait","to":{"name":"Awaiting"},"hasScreen":true,"fields":{"comment":{"required":false,"name":"Comment"},"resolution":{"required":true,"name":"Resolution","schema":{"type":"resolution"},"allowedValues":[{"id":"10000","name":"Done"}]}}}]}"#.utf8))
         case "/rest/api/3/myself": return (200, Data(#"{"displayName":"Test User","accountId":"1"}"#.utf8))
         case "/rest/api/3/search/jql":
             return (200, Data(#"""

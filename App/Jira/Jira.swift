@@ -128,33 +128,65 @@ struct JiraTransition: Decodable, Identifiable, Hashable, Sendable {
         var name: String
         var statusCategory: Category?
     }
+    /// A field the move's screen holds ("Resolution", "Comment").
+    struct Field: Decodable, Hashable, Sendable {
+        struct Schema: Decodable, Hashable, Sendable { var type: String? }
+        struct Option: Decodable, Hashable, Sendable {
+            var id: String?
+            var name: String?
+            var value: String?
+            var label: String { name ?? value ?? id ?? "?" }
+        }
+        var required: Bool
+        var name: String
+        var schema: Schema?
+        var allowedValues: [Option]?
+        var hasDefaultValue: Bool?
+    }
     var id: String
     var name: String
     var to: Target?
+    /// Jira's own page shows a form for this move (often a comment).
+    var hasScreen: Bool?
+    var fields: [String: Field]?
+
+    /// Fields the user has to fill before Jira takes the move, in a steady order.
+    var requiredFields: [(id: String, field: Field)] {
+        (fields ?? [:]).filter { $0.value.required && $0.value.hasDefaultValue != true && $0.key != "comment" }
+            .map { (id: $0.key, field: $0.value) }.sorted { $0.field.name < $1.field.name }
+    }
+    /// Jira asks for something before it moves the ticket.
+    var asks: Bool { hasScreen == true || !requiredFields.isEmpty }
+    var commentRequired: Bool { fields?["comment"]?.required == true }
+}
+
+/// What goes with a move: a comment and the values of its screen's fields.
+struct JiraMoveInput: Sendable {
+    var comment = ""
+    /// Field id → chosen option id, or text for a field without options.
+    var values: [String: String] = [:]
+
+    /// The POST body for /transitions.
+    func body(_ transition: JiraTransition) -> [String: Any] {
+        var body: [String: Any] = ["transition": ["id": transition.id]]
+        var fields: [String: Any] = [:]
+        for (id, value) in values where !value.isEmpty {
+            let field = transition.fields?[id]
+            let item: Any = field?.allowedValues == nil ? value : ["id": value]
+            fields[id] = field?.schema?.type == "array" ? [item] : item
+        }
+        if !fields.isEmpty { body["fields"] = fields }
+        let text = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { body["update"] = ["comment": [["add": ["body": JiraTicket.document(text)]]]] }
+        return body
+    }
 }
 
 extension JiraClient {
     func transitions(_ key: String) async throws -> [JiraTransition] {
         struct Page: Decodable { var transitions: [JiraTransition] }
-        let page: Page = try await get("rest/api/3/issue/\(key)/transitions")
+        let page: Page = try await get("rest/api/3/issue/\(key)/transitions", query: [.init(name: "expand", value: "transitions.fields")])
         return page.transitions
-    }
-
-    /// Moves a ticket along its workflow. The one thing the app writes to Jira.
-    func move(_ key: String, transition id: String) async throws {
-        var request = URLRequest(url: site.appending(path: "rest/api/3/issue/\(key)/transitions"), timeoutInterval: 20)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Basic " + Data("\(email):\(token)".utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["transition": ["id": id]])
-        let (_, response) = try await session.data(for: request, delegate: AuthGuard.shared)
-        guard let http = response as? HTTPURLResponse else { throw JiraError.notAnswer }
-        switch http.statusCode {
-        case 200..<300: return
-        case 401, 403: throw JiraError.refused
-        case 404: throw JiraError.notFound
-        default: throw JiraError.http(http.statusCode)
-        }
     }
 }
 
@@ -257,18 +289,6 @@ extension AppModel {
     func transitions(for issue: JiraIssue) async -> [JiraTransition] {
         guard let settings = jiraSettings, let client = jiraClient(settings) else { return [] }
         return (try? await client.transitions(issue.key)) ?? []
-    }
-
-    /// Moves a ticket to another status, because the user chose it.
-    func move(_ issue: JiraIssue, by transition: JiraTransition) async {
-        guard let settings = jiraSettings, let client = jiraClient(settings) else { return }
-        do {
-            try await client.move(issue.key, transition: transition.id)
-            toast("\(issue.key) is now \(transition.to?.name ?? transition.name)")
-            await refreshJira()
-        } catch {
-            toast("\(issue.key): \(error.localizedDescription)", .error)
-        }
     }
 
     func jiraURL(_ issue: JiraIssue) -> URL? {
